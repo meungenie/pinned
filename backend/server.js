@@ -5,7 +5,7 @@
 require("dotenv").config(); // 환경 변수 로드
 const app = require("./src/app"); // 설정된 Express 앱 가져오기
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 // 1. 서버 실행
 const server = app.listen(PORT, () => {
