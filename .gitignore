@@ -44,3 +44,5 @@ terraform.tfstate
 terraform.tfstate.backup
 *.tfvars
 *.tfvars.json
+terraform/tfplan
+terraform/plan.json
