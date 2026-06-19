@@ -32,3 +32,9 @@ variable "github_repo" {
   description = "GitHub 레포 (owner/repo 형식)"
   default     = "meungenie/pinned"
 }
+
+variable "db_password" {
+  description = "Cloud SQL 사용자 비밀번호"
+  sensitive   = true
+  default     = "changeme-before-production"
+}
