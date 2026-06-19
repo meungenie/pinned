@@ -22,11 +22,12 @@ provider "google" {
 # 필요한 GCP API 활성화
 resource "google_project_service" "apis" {
   for_each = toset([
-    "container.googleapis.com",       # GKE
-    "storage.googleapis.com",         # GCS
-    "iam.googleapis.com",             # IAM
-    "artifactregistry.googleapis.com", # Docker 이미지 저장소
-    "compute.googleapis.com",         # GKE 노드용
+    "cloudresourcemanager.googleapis.com", # Terraform IAM/API 관리에 필수 (첫 실행 전 수동 활성화)
+    "container.googleapis.com",            # GKE
+    "storage.googleapis.com",              # GCS
+    "iam.googleapis.com",                  # IAM
+    "artifactregistry.googleapis.com",     # Docker 이미지 저장소
+    "compute.googleapis.com",              # GKE 노드용
   ])
 
   service            = each.value
