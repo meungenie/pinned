@@ -34,3 +34,15 @@ yarn-error.log*
 *.njsproj
 *.sln
 *.sw?
+# Kubernetes secrets (절대 git에 올리지 않음)
+k8s/backend/secret.yaml
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+*.tfvars
+*.tfvars.json
+terraform/tfplan
+terraform/plan.json

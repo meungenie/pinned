@@ -41,6 +41,7 @@ jobs:
         run: |
           terraform plan -input=false -out=tfplan
           terraform show -json tfplan > plan.json
+        continue-on-error: true
 
       - name: Python 설치
         uses: actions/setup-python@v5

@@ -1,27 +1,49 @@
-// frontend/src/pages/Signup.js
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AuthLayout from "../layouts/AuthLayout";
+import { signupUser } from "../api/authApi";
 
-const Signup = () => {
-  // ... (상단 useState, handleChange, handleSubmit 로직은 아까와 동일하므로 생략)
-  // 테스트를 위해 handleSubmit 성공 부분에 navigate('/') 로 메인으로 가게 임시 수정해도 좋습니다.
+const Signup = ({ onLogin }) => {
+  const navigate = useNavigate();
+  const [form, setForm] = useState({ handle: "", username: "", email: "", password: "" });
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const { user } = await signupUser(form);
+      onLogin(user);
+      navigate("/");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <AuthLayout title="계정 만들기" subtitle="이미 계정이 있나요? 로그인하기">
-      <form style={formStyles.form}>
+    <AuthLayout title="계정 만들기" subtitle="세상을 기록하기 시작해요.">
+      <form onSubmit={handleSubmit} style={formStyles.form}>
         <input
           type="text"
           name="handle"
-          placeholder="@handle (고유 아이디)"
+          placeholder="@handle (고유 아이디, 영문+숫자)"
+          value={form.handle}
+          onChange={handleChange}
           style={formStyles.input}
           required
         />
-        {/* 나머지 인풋들도 동일한 스타일 적용 */}
         <input
           type="text"
           name="username"
           placeholder="이름"
+          value={form.username}
+          onChange={handleChange}
           style={formStyles.input}
           required
         />
@@ -29,18 +51,27 @@ const Signup = () => {
           type="email"
           name="email"
           placeholder="이메일"
+          value={form.email}
+          onChange={handleChange}
           style={formStyles.input}
           required
         />
         <input
           type="password"
           name="password"
-          placeholder="비밀번호 (8자 이상)"
+          placeholder="비밀번호 (6자 이상)"
+          value={form.password}
+          onChange={handleChange}
           style={formStyles.input}
           required
         />
-        <button type="submit" style={formStyles.button}>
-          가입 완료 🚀
+        {error && <p style={styles.error}>{error}</p>}
+        <button
+          type="submit"
+          disabled={loading}
+          style={{ ...formStyles.button, opacity: loading ? 0.7 : 1 }}
+        >
+          {loading ? "가입 중..." : "가입 완료 🚀"}
         </button>
       </form>
       <p style={{ marginTop: "20px", color: "#666" }}>
@@ -53,7 +84,10 @@ const Signup = () => {
   );
 };
 
-// 공통 스타일 (나중에 별도 파일로 분리 가능)
+const styles = {
+  error: { color: "#e53e3e", fontSize: "14px", margin: 0 },
+};
+
 export const formStyles = {
   form: { display: "flex", flexDirection: "column", gap: "15px" },
   input: {

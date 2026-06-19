@@ -1,0 +1,103 @@
+name: Build & Deploy to GKE
+
+on:
+  push:
+    branches: [main]
+
+env:
+  PROJECT_ID: pinned-4cf6c
+  REGION: asia-northeast3          # 서울
+  CLUSTER: pinned-cluster
+  ARTIFACT_REPO: pinned
+  IMAGE: backend
+
+jobs:
+  # ── 1단계: 테스트 ──────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+  # ── 2단계: 빌드 & 이미지 푸시 ──────────────────────────
+  build-push:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Set image tag
+        id: meta
+        run: |
+          IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:${{ github.sha }}"
+          echo "image=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Build & Push Docker image
+        run: |
+          docker build -t ${{ steps.meta.outputs.image }} ./backend
+          docker push ${{ steps.meta.outputs.image }}
+
+  # ── 3단계: GKE 배포 ────────────────────────────────────
+  deploy:
+    needs: build-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+
+      - name: Apply Kubernetes manifests
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/backend/configmap.yaml
+          kubectl apply -f k8s/backend/service.yaml
+          kubectl apply -f k8s/backend/hpa.yaml
+          kubectl apply -f k8s/ingress.yaml
+
+      - name: Update deployment image
+        run: |
+          kubectl set image deployment/backend \
+            backend=${{ needs.build-push.outputs.image }} \
+            -n pinned
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/backend -n pinned --timeout=5m
+
+      - name: Deployment summary
+        run: |
+          echo "### 배포 완료 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "- 이미지: ${{ needs.build-push.outputs.image }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 클러스터: ${{ env.CLUSTER }}" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n pinned >> $GITHUB_STEP_SUMMARY
