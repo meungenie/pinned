@@ -187,6 +187,20 @@ resource "google_project_iam_member" "self_healer_gke" {
   member  = "serviceAccount:${google_service_account.self_healer.email}"
 }
 
+# Eventarc 트리거가 Cloud Run 서비스를 호출할 수 있도록 권한 부여
+resource "google_project_iam_member" "self_healer_run_invoker" {
+  project = var.project_id
+  role    = "roles/run.invoker"
+  member  = "serviceAccount:${google_service_account.self_healer.email}"
+}
+
+# Eventarc 이벤트 수신 권한
+resource "google_project_iam_member" "self_healer_eventarc" {
+  project = var.project_id
+  role    = "roles/eventarc.eventReceiver"
+  member  = "serviceAccount:${google_service_account.self_healer.email}"
+}
+
 resource "google_project_iam_member" "self_healer_logging" {
   project = var.project_id
   role    = "roles/logging.viewer"
