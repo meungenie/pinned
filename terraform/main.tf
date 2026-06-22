@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.5"
+    }
   }
 
   backend "gcs" {
@@ -27,7 +31,9 @@ resource "google_project_service" "apis" {
     "storage.googleapis.com",              # GCS
     "iam.googleapis.com",                  # IAM
     "artifactregistry.googleapis.com",     # Docker 이미지 저장소
-    "compute.googleapis.com",              # GKE 노드용
+    "compute.googleapis.com",              # GKE 노드 및 VPC/Private IP
+    "servicenetworking.googleapis.com",    # Cloud SQL Private IP (VPC Peering)
+    "secretmanager.googleapis.com",        # DB 비밀번호 등 시크릿 관리
   ])
 
   service            = each.value
