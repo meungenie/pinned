@@ -12,6 +12,13 @@ resource "google_storage_bucket_iam_member" "backend_photos" {
   member = "serviceAccount:${google_service_account.backend.email}"
 }
 
+# 백엔드 SA가 DB 비밀번호 시크릿을 읽을 수 있도록 권한 부여 (최소 범위: 해당 시크릿만)
+resource "google_secret_manager_secret_iam_member" "backend_db_password" {
+  secret_id = google_secret_manager_secret.db_password.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # Workload Identity 바인딩
 # K8s 서비스 계정 → GCP 서비스 계정으로 권한 위임
 # 파드에 JSON 키 없이 GCP API 사용 가능

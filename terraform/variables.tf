@@ -32,3 +32,7 @@ variable "github_repo" {
   description = "GitHub 레포 (owner/repo 형식)"
   default     = "meungenie/pinned"
 }
+
+# db_password 변수 제거:
+# 비밀번호는 random_password로 생성하여 Secret Manager에 저장하므로
+# 코드/tfvars에 평문으로 보관하지 않습니다.

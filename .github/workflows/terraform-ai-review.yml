@@ -6,8 +6,8 @@ on:
       - "terraform/**"
 
 permissions:
-  contents: read
-  pull-requests: write      # PR 코멘트 작성
+  contents: write           # Fix PR 브랜치 생성 및 파일 커밋
+  pull-requests: write      # PR 코멘트 작성 + Fix PR 생성
   id-token: write           # Workload Identity Federation
 
 jobs:
@@ -58,4 +58,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: python ../scripts/ai_terraform_review.py plan.json
+        run: python ../scripts/ai_terraform_review.py plan.json .
