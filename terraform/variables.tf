@@ -33,8 +33,6 @@ variable "github_repo" {
   default     = "meungenie/pinned"
 }
 
-variable "db_password" {
-  description = "Cloud SQL 사용자 비밀번호"
-  sensitive   = true
-  default     = "changeme-before-production"
-}
+# db_password 변수 제거:
+# 비밀번호는 random_password로 생성하여 Secret Manager에 저장하므로
+# 코드/tfvars에 평문으로 보관하지 않습니다.
