@@ -13,22 +13,30 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import anthropic
 from anthropic import Anthropic
 
 client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
+# Opus 과부하 시 Sonnet으로 자동 전환
+_FALLBACK_MODELS = ["claude-opus-4-8", "claude-sonnet-4-6"]
 
-def claude_create(retries: int = 5, base_delay: int = 15, **kwargs) -> object:
-    for attempt in range(retries):
-        try:
-            return client.messages.create(**kwargs)
-        except Exception as e:
-            if "overloaded_error" in str(e) and attempt < retries - 1:
-                delay = base_delay * (2 ** attempt)
-                print(f"⚠️  API 과부하 — {delay}초 후 재시도 ({attempt + 1}/{retries - 1})")
-                time.sleep(delay)
-            else:
-                raise
+
+def claude_create(retries: int = 2, base_delay: int = 10, **kwargs) -> object:
+    for model in _FALLBACK_MODELS:
+        kwargs["model"] = model
+        for attempt in range(retries):
+            try:
+                print(f"🤖 {model} 호출 중...")
+                return client.messages.create(**kwargs)
+            except anthropic.OverloadedError:
+                if attempt < retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"⚠️  과부하 — {delay}초 후 재시도")
+                    time.sleep(delay)
+                else:
+                    print(f"⚠️  {model} 과부하 — 다음 모델로 전환")
+    raise RuntimeError("모든 모델이 과부하 상태입니다. 잠시 후 다시 시도하세요.")
 
 
 def extract_changes(plan: dict) -> list[dict]:
