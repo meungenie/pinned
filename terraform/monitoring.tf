@@ -202,31 +202,36 @@ resource "google_secret_manager_secret_iam_member" "self_healer_secret" {
 
 # ── Cloud Build 서비스 계정 권한 ──────────────────────────────────────────────
 
-resource "google_project_iam_member" "cloudbuild_builder" {
+# Cloud Functions v2 빌드에 사용되는 Compute Engine 기본 서비스 계정 권한 부여
+locals {
+  compute_sa = "${data.google_project.project.number}-compute@developer.gserviceaccount.com"
+}
+
+resource "google_project_iam_member" "compute_sa_builder" {
   project = var.project_id
   role    = "roles/cloudbuild.builds.builder"
-  member  = "serviceAccount:${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+  member  = "serviceAccount:${local.compute_sa}"
 }
 
-resource "google_project_iam_member" "cloudbuild_logging" {
+resource "google_project_iam_member" "compute_sa_logging" {
   project = var.project_id
   role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+  member  = "serviceAccount:${local.compute_sa}"
 }
 
-resource "google_project_iam_member" "cloudbuild_registry" {
+resource "google_project_iam_member" "compute_sa_registry" {
   project = var.project_id
   role    = "roles/artifactregistry.writer"
-  member  = "serviceAccount:${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+  member  = "serviceAccount:${local.compute_sa}"
 }
 
 # IAM 전파 대기 (GCP IAM 변경은 전파까지 최대 60초 소요)
 resource "time_sleep" "wait_for_cloudbuild_iam" {
   create_duration = "60s"
   depends_on = [
-    google_project_iam_member.cloudbuild_builder,
-    google_project_iam_member.cloudbuild_logging,
-    google_project_iam_member.cloudbuild_registry,
+    google_project_iam_member.compute_sa_builder,
+    google_project_iam_member.compute_sa_logging,
+    google_project_iam_member.compute_sa_registry,
   ]
 }
 
