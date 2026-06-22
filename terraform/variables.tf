@@ -36,3 +36,9 @@ variable "github_repo" {
 # db_password 변수 제거:
 # 비밀번호는 random_password로 생성하여 Secret Manager에 저장하므로
 # 코드/tfvars에 평문으로 보관하지 않습니다.
+
+variable "slack_webhook_url" {
+  description = "Self-Healing 결과 알림용 Slack Incoming Webhook URL"
+  sensitive   = true
+  default     = ""
+}
