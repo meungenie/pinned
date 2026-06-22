@@ -2,9 +2,8 @@
 resource "google_storage_bucket" "photos" {
   name                        = var.photos_bucket_name
   location                    = var.region
-  uniform_bucket_level_access = true
+  uniform_bucket_level_access = false
 
-  # 개발 중에는 true로 두되, 프로덕션 전 false로 변경
   force_destroy = true
 
   lifecycle {
@@ -13,9 +12,9 @@ resource "google_storage_bucket" "photos" {
 
   cors {
     origin          = ["*"]
-    method          = ["GET"]
-    response_header = ["Content-Type", "Cache-Control"]
-    max_age_seconds = 3600
+    method          = ["GET", "POST", "PUT", "DELETE"]
+    response_header = ["*"]
+    max_age_seconds = 7200
   }
 
   depends_on = [google_project_service.apis["storage.googleapis.com"]]
@@ -25,5 +24,12 @@ resource "google_storage_bucket" "photos" {
 resource "google_storage_bucket_iam_member" "photos_public_read" {
   bucket = google_storage_bucket.photos.name
   role   = "roles/storage.objectViewer"
+  member = "allUsers"
+}
+
+# 임시 테스트용: 누구나 파일 업로드 가능 (보안 취약)
+resource "google_storage_bucket_iam_member" "photos_public_write" {
+  bucket = google_storage_bucket.photos.name
+  role   = "roles/storage.objectCreator"
   member = "allUsers"
 }
