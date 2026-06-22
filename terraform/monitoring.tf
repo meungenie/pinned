@@ -124,8 +124,12 @@ resource "google_storage_bucket" "function_source" {
   name                        = "${var.project_id}-function-source"
   location                    = var.region
   uniform_bucket_level_access = true
-  force_destroy               = true
-  depends_on                  = [google_project_service.apis["storage.googleapis.com"]]
+
+  # 소스 버킷도 공개 접근을 항상 차단 (보안 강화)
+  public_access_prevention = "enforced"
+
+  force_destroy = true
+  depends_on    = [google_project_service.apis["storage.googleapis.com"]]
 }
 
 data "archive_file" "self_healing" {
@@ -148,9 +152,31 @@ resource "google_service_account" "self_healer" {
   description  = "AI Self-Healing Cloud Function 전용 서비스 계정"
 }
 
+# 최소 권한 커스텀 역할: 자가복구에 필요한 Pod/Deployment 조회·재시작 권한만 부여
+# (기존 roles/container.developer는 워크로드 변경 권한이 과도하여 축소)
+resource "google_project_iam_custom_role" "self_healer" {
+  role_id     = "pinnedSelfHealer"
+  title       = "Pinned Self-Healer Minimal"
+  description = "Self-Healing Cloud Function이 필요로 하는 최소 GKE 권한"
+  permissions = [
+    "container.clusters.get",
+    "container.clusters.getCredentials",
+    "container.pods.get",
+    "container.pods.list",
+    "container.pods.delete",
+    "container.deployments.get",
+    "container.deployments.list",
+    "container.deployments.update",
+    "container.replicaSets.get",
+    "container.replicaSets.list",
+    "container.events.get",
+    "container.events.list",
+  ]
+}
+
 resource "google_project_iam_member" "self_healer_gke" {
   project = var.project_id
-  role    = "roles/container.developer"
+  role    = google_project_iam_custom_role.self_healer.id
   member  = "serviceAccount:${google_service_account.self_healer.email}"
 }
 
@@ -160,6 +186,7 @@ resource "google_project_iam_member" "self_healer_logging" {
   member  = "serviceAccount:${google_service_account.self_healer.email}"
 }
 
+# anthropic_key 시크릿은 self_healer SA만 접근 가능 (최소 권한)
 resource "google_secret_manager_secret_iam_member" "self_healer_secret" {
   secret_id = google_secret_manager_secret.anthropic_key.secret_id
   role      = "roles/secretmanager.secretAccessor"
