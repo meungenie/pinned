@@ -200,6 +200,20 @@ resource "google_secret_manager_secret_iam_member" "self_healer_secret" {
   member    = "serviceAccount:${google_service_account.self_healer.email}"
 }
 
+# ── Cloud Build 서비스 계정 권한 ──────────────────────────────────────────────
+
+resource "google_project_iam_member" "cloudbuild_builder" {
+  project = var.project_id
+  role    = "roles/cloudbuild.builds.builder"
+  member  = "serviceAccount:${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+}
+
+resource "google_project_iam_member" "cloudbuild_logging" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+}
+
 # ── Cloud Function v2 ─────────────────────────────────────────────────────────
 
 resource "google_cloudfunctions2_function" "self_healer" {
@@ -251,5 +265,7 @@ resource "google_cloudfunctions2_function" "self_healer" {
     google_project_service.apis["cloudfunctions.googleapis.com"],
     google_project_service.apis["run.googleapis.com"],
     google_storage_bucket_object.self_healing_source,
+    google_project_iam_member.cloudbuild_builder,
+    google_project_iam_member.cloudbuild_logging,
   ]
 }
