@@ -14,7 +14,7 @@ import urllib.request
 import urllib.error
 from anthropic import Anthropic
 
-client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"), max_retries=3)
 
 
 def extract_changes(plan: dict) -> list[dict]:
