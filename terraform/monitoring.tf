@@ -214,6 +214,22 @@ resource "google_project_iam_member" "cloudbuild_logging" {
   member  = "serviceAccount:${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
 }
 
+resource "google_project_iam_member" "cloudbuild_registry" {
+  project = var.project_id
+  role    = "roles/artifactregistry.writer"
+  member  = "serviceAccount:${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+}
+
+# IAM 전파 대기 (GCP IAM 변경은 전파까지 최대 60초 소요)
+resource "time_sleep" "wait_for_cloudbuild_iam" {
+  create_duration = "60s"
+  depends_on = [
+    google_project_iam_member.cloudbuild_builder,
+    google_project_iam_member.cloudbuild_logging,
+    google_project_iam_member.cloudbuild_registry,
+  ]
+}
+
 # ── Cloud Function v2 ─────────────────────────────────────────────────────────
 
 resource "google_cloudfunctions2_function" "self_healer" {
@@ -265,7 +281,6 @@ resource "google_cloudfunctions2_function" "self_healer" {
     google_project_service.apis["cloudfunctions.googleapis.com"],
     google_project_service.apis["run.googleapis.com"],
     google_storage_bucket_object.self_healing_source,
-    google_project_iam_member.cloudbuild_builder,
-    google_project_iam_member.cloudbuild_logging,
+    time_sleep.wait_for_cloudbuild_iam,
   ]
 }
