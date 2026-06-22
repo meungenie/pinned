@@ -5,11 +5,18 @@ resource "google_pubsub_topic" "gke_alerts" {
   depends_on = [google_project_service.apis["pubsub.googleapis.com"]]
 }
 
+# Monitoring API 활성화 후 서비스 계정 생성까지 대기
+resource "time_sleep" "wait_for_monitoring_sa" {
+  create_duration = "30s"
+  depends_on      = [google_project_service.apis["monitoring.googleapis.com"]]
+}
+
 # Cloud Monitoring이 Pub/Sub에 publish할 수 있도록 권한 부여
 resource "google_pubsub_topic_iam_member" "monitoring_publish" {
   topic  = google_pubsub_topic.gke_alerts.name
   role   = "roles/pubsub.publisher"
   member = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-monitoring-notification.iam.gserviceaccount.com"
+  depends_on = [time_sleep.wait_for_monitoring_sa]
 }
 
 data "google_project" "project" {}
@@ -95,8 +102,8 @@ resource "google_monitoring_alert_policy" "no_pods_running" {
       duration        = "60s"
       aggregations {
         alignment_period     = "60s"
-        per_series_aligner   = "ALIGN_COUNT_TRUE"
-        cross_series_reducer = "REDUCE_SUM"
+        per_series_aligner   = "ALIGN_MEAN"
+        cross_series_reducer = "REDUCE_COUNT"
       }
     }
   }
