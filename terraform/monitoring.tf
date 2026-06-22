@@ -1,0 +1,221 @@
+# ── Pub/Sub ───────────────────────────────────────────────────────────────────
+
+resource "google_pubsub_topic" "gke_alerts" {
+  name       = "pinned-gke-alerts"
+  depends_on = [google_project_service.apis["pubsub.googleapis.com"]]
+}
+
+# Cloud Monitoring이 Pub/Sub에 publish할 수 있도록 권한 부여
+resource "google_pubsub_topic_iam_member" "monitoring_publish" {
+  topic  = google_pubsub_topic.gke_alerts.name
+  role   = "roles/pubsub.publisher"
+  member = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-monitoring-notification.iam.gserviceaccount.com"
+}
+
+data "google_project" "project" {}
+
+# ── 알림 채널 (Alert → Pub/Sub) ───────────────────────────────────────────────
+
+resource "google_monitoring_notification_channel" "pubsub" {
+  display_name = "GKE Alert → Pub/Sub (Self-Healer)"
+  type         = "pubsub"
+  labels = {
+    topic = google_pubsub_topic.gke_alerts.id
+  }
+  depends_on = [google_project_service.apis["monitoring.googleapis.com"]]
+}
+
+# ── Alert Policies ─────────────────────────────────────────────────────────────
+
+# Pod 재시작 과다 (CrashLoopBackOff 조기 감지)
+resource "google_monitoring_alert_policy" "pod_restarts" {
+  display_name = "[Pinned] GKE Pod 재시작 과다"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "컨테이너 재시작 횟수 > 3 (1분)"
+    condition_threshold {
+      filter          = "resource.type=\"k8s_container\" AND resource.labels.namespace_name=\"${var.k8s_namespace}\" AND metric.type=\"kubernetes.io/container/restart_count\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 3
+      duration        = "60s"
+      aggregations {
+        alignment_period   = "60s"
+        per_series_aligner = "ALIGN_DELTA"
+      }
+    }
+  }
+
+  notification_channels = [google_monitoring_notification_channel.pubsub.name]
+  alert_strategy {
+    auto_close = "604800s"
+  }
+  depends_on = [google_project_service.apis["monitoring.googleapis.com"]]
+}
+
+# 메모리 사용률 > 85% (OOMKilled 예방)
+resource "google_monitoring_alert_policy" "high_memory" {
+  display_name = "[Pinned] GKE 메모리 사용률 > 85%"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "컨테이너 메모리 사용률 > 85%"
+    condition_threshold {
+      filter          = "resource.type=\"k8s_container\" AND resource.labels.namespace_name=\"${var.k8s_namespace}\" AND metric.type=\"kubernetes.io/container/memory/used_bytes\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0.85
+      duration        = "120s"
+      aggregations {
+        alignment_period     = "60s"
+        per_series_aligner   = "ALIGN_MEAN"
+        cross_series_reducer = "REDUCE_MEAN"
+        group_by_fields      = ["resource.labels.container_name"]
+      }
+    }
+  }
+
+  notification_channels = [google_monitoring_notification_channel.pubsub.name]
+  alert_strategy {
+    auto_close = "604800s"
+  }
+  depends_on = [google_project_service.apis["monitoring.googleapis.com"]]
+}
+
+# 실행 중인 Pod 0개 (서비스 완전 다운)
+resource "google_monitoring_alert_policy" "no_pods_running" {
+  display_name = "[Pinned] GKE 실행 중 Pod 없음"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "Ready Pod 수 = 0"
+    condition_threshold {
+      filter          = "resource.type=\"k8s_container\" AND resource.labels.namespace_name=\"${var.k8s_namespace}\" AND metric.type=\"kubernetes.io/container/uptime\""
+      comparison      = "COMPARISON_LT"
+      threshold_value = 1
+      duration        = "60s"
+      aggregations {
+        alignment_period     = "60s"
+        per_series_aligner   = "ALIGN_COUNT_TRUE"
+        cross_series_reducer = "REDUCE_SUM"
+      }
+    }
+  }
+
+  notification_channels = [google_monitoring_notification_channel.pubsub.name]
+  alert_strategy {
+    auto_close = "604800s"
+  }
+  depends_on = [google_project_service.apis["monitoring.googleapis.com"]]
+}
+
+# ── Secret Manager (Anthropic API Key) ────────────────────────────────────────
+
+resource "google_secret_manager_secret" "anthropic_key" {
+  secret_id = "anthropic-api-key"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.apis["secretmanager.googleapis.com"]]
+}
+
+# ── Cloud Function 소스 코드 버킷 ──────────────────────────────────────────────
+
+resource "google_storage_bucket" "function_source" {
+  name                        = "${var.project_id}-function-source"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = true
+  depends_on                  = [google_project_service.apis["storage.googleapis.com"]]
+}
+
+data "archive_file" "self_healing" {
+  type        = "zip"
+  source_dir  = "${path.module}/../scripts/self_healing"
+  output_path = "${path.module}/../scripts/self_healing.zip"
+}
+
+resource "google_storage_bucket_object" "self_healing_source" {
+  name   = "self_healing_${data.archive_file.self_healing.output_md5}.zip"
+  bucket = google_storage_bucket.function_source.name
+  source = data.archive_file.self_healing.output_path
+}
+
+# ── Self-Healer 서비스 계정 ────────────────────────────────────────────────────
+
+resource "google_service_account" "self_healer" {
+  account_id   = "pinned-self-healer"
+  display_name = "Pinned Self-Healer (Cloud Function)"
+  description  = "AI Self-Healing Cloud Function 전용 서비스 계정"
+}
+
+resource "google_project_iam_member" "self_healer_gke" {
+  project = var.project_id
+  role    = "roles/container.developer"
+  member  = "serviceAccount:${google_service_account.self_healer.email}"
+}
+
+resource "google_project_iam_member" "self_healer_logging" {
+  project = var.project_id
+  role    = "roles/logging.viewer"
+  member  = "serviceAccount:${google_service_account.self_healer.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "self_healer_secret" {
+  secret_id = google_secret_manager_secret.anthropic_key.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.self_healer.email}"
+}
+
+# ── Cloud Function v2 ─────────────────────────────────────────────────────────
+
+resource "google_cloudfunctions2_function" "self_healer" {
+  name     = "pinned-self-healer"
+  location = var.region
+
+  build_config {
+    runtime     = "python312"
+    entry_point = "self_heal"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.function_source.name
+        object = google_storage_bucket_object.self_healing_source.name
+      }
+    }
+  }
+
+  service_config {
+    min_instance_count    = 0
+    max_instance_count    = 3
+    timeout_seconds       = 300
+    service_account_email = google_service_account.self_healer.email
+
+    environment_variables = {
+      PROJECT_ID     = var.project_id
+      CLUSTER_NAME   = var.cluster_name
+      CLUSTER_REGION = var.region
+      K8S_NAMESPACE  = var.k8s_namespace
+      SLACK_WEBHOOK  = var.slack_webhook_url
+    }
+
+    secret_environment_variables {
+      key        = "ANTHROPIC_API_KEY"
+      project_id = var.project_id
+      secret     = google_secret_manager_secret.anthropic_key.secret_id
+      version    = "latest"
+    }
+  }
+
+  event_trigger {
+    trigger_region        = var.region
+    event_type            = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic          = google_pubsub_topic.gke_alerts.id
+    retry_policy          = "RETRY_POLICY_RETRY"
+    service_account_email = google_service_account.self_healer.email
+  }
+
+  depends_on = [
+    google_project_service.apis["cloudfunctions.googleapis.com"],
+    google_project_service.apis["run.googleapis.com"],
+    google_storage_bucket_object.self_healing_source,
+  ]
+}

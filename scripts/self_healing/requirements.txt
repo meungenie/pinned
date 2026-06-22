@@ -1,0 +1,7 @@
+functions-framework==3.*
+anthropic>=0.40.0
+google-cloud-container>=2.0.0
+google-cloud-logging>=3.0.0
+google-auth>=2.0.0
+kubernetes>=28.0.0
+requests>=2.31.0
