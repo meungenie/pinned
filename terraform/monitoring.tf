@@ -255,6 +255,7 @@ resource "google_cloudfunctions2_function" "self_healer" {
   service_config {
     min_instance_count    = 0
     max_instance_count    = 3
+    available_memory      = "512Mi"
     timeout_seconds       = 300
     service_account_email = google_service_account.self_healer.email
 
