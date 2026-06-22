@@ -279,8 +279,10 @@ def notify_slack(alert: dict, diagnosis: dict, result: str) -> None:
 
 @functions_framework.cloud_event
 def self_heal(cloud_event) -> None:
-    # Pub/Sub 메시지 파싱
-    raw = base64.b64decode(cloud_event.data["message"]["data"]).decode()
+    # Pub/Sub 메시지 파싱 (제어 문자 제거 후 파싱)
+    raw = base64.b64decode(cloud_event.data["message"]["data"]).decode("utf-8", errors="replace")
+    import re as _re
+    raw = _re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", raw)
     alert = json.loads(raw)
     incident = alert.get("incident", {})
     resource_name = incident.get("resource", {}).get("labels", {}).get("container_name", "")
