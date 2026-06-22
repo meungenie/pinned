@@ -10,11 +10,25 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.request
 import urllib.error
 from anthropic import Anthropic
 
-client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"), max_retries=3)
+client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+
+
+def claude_create(retries: int = 5, base_delay: int = 15, **kwargs) -> object:
+    for attempt in range(retries):
+        try:
+            return client.messages.create(**kwargs)
+        except Exception as e:
+            if "overloaded_error" in str(e) and attempt < retries - 1:
+                delay = base_delay * (2 ** attempt)
+                print(f"⚠️  API 과부하 — {delay}초 후 재시도 ({attempt + 1}/{retries - 1})")
+                time.sleep(delay)
+            else:
+                raise
 
 
 def extract_changes(plan: dict) -> list[dict]:
@@ -107,14 +121,12 @@ def review_with_claude(changes: list[dict], summary: dict) -> str:
 - **수정 요청** — 특정 부분 수정 후 승인
 - **차단** — 즉시 적용하면 위험함"""
 
-    with client.messages.stream(
+    message = claude_create(
         model="claude-opus-4-8",
         max_tokens=2048,
         thinking={"type": "adaptive"},
         messages=[{"role": "user", "content": prompt}],
-    ) as stream:
-        message = stream.get_final_message()
-
+    )
     text_block = next((b for b in message.content if b.type == "text"), None)
     return text_block.text if text_block else "리뷰 생성 실패"
 
@@ -157,7 +169,7 @@ def generate_fixes_with_claude(
 ]
 ```"""
 
-    message = client.messages.create(
+    message = claude_create(
         model="claude-opus-4-8",
         max_tokens=8096,
         thinking={"type": "adaptive"},
