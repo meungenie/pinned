@@ -40,7 +40,7 @@ jobs:
         id: tf-plan
         working-directory: terraform
         run: |
-          if terraform plan -input=false -out=tfplan; then
+          if terraform plan -input=false -refresh=false -out=tfplan; then
             terraform show -json tfplan > plan.json
             echo "success=true" >> $GITHUB_OUTPUT
           else
