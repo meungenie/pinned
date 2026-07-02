@@ -1,5 +1,6 @@
 # ── Falco Runtime Security ─────────────────────────────────────────────────────
-# Falcosidekick이 Falco 보안 이벤트를 기존 pinned-gke-alerts Pub/Sub 토픽으로 전송
+# Falcosidekick → pinned-gke-alerts Pub/Sub 토픽으로 런타임 보안 이벤트 전송
+# Self-Healer Cloud Function이 동일 토픽을 구독해 자동 대응
 
 resource "google_service_account" "falcosidekick" {
   account_id   = "pinned-falcosidekick"
