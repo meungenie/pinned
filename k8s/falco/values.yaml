@@ -1,0 +1,81 @@
+driver:
+  kind: modern_ebpf   # GKE COS 노드에서 커널 모듈 없이 동작
+
+collectors:
+  kubernetes:
+    enabled: true     # Pod/Deployment 메타데이터를 이벤트에 포함
+
+customRules:
+  pinned-rules.yaml: |
+    # ── 쉘 실행 탐지 ───────────────────────────────────────────────────────────
+    - rule: Unexpected shell in pinned backend
+      desc: 백엔드 컨테이너 안에서 쉘이 실행됨 (공격자 침입 지표)
+      condition: >
+        spawned_process and
+        container.name = "backend" and
+        proc.name in (shell_binaries)
+      output: >
+        Shell spawned in pinned backend
+        (user=%user.name pod=%k8s.pod.name ns=%k8s.ns.name
+         shell=%proc.name parent=%proc.pname cmdline=%proc.cmdline)
+      priority: CRITICAL
+      tags: [pinned, shell, intrusion]
+
+    # ── 네트워크 도구 실행 탐지 ───────────────────────────────────────────────
+    - rule: Network tool execution in pinned backend
+      desc: curl/wget/nc 등 네트워크 도구 실행 — 데이터 유출 시도 가능
+      condition: >
+        spawned_process and
+        container.name = "backend" and
+        proc.name in (curl, wget, nc, ncat, netcat)
+      output: >
+        Network tool executed in pinned backend
+        (user=%user.name pod=%k8s.pod.name ns=%k8s.ns.name
+         tool=%proc.name cmdline=%proc.cmdline)
+      priority: CRITICAL
+      tags: [pinned, exfiltration, network]
+
+    # ── 민감한 파일 읽기 탐지 ─────────────────────────────────────────────────
+    - rule: Sensitive file read in pinned backend
+      desc: /etc/passwd, /etc/shadow 등 민감 파일 접근
+      condition: >
+        open_read and
+        container.name = "backend" and
+        fd.name in (/etc/passwd, /etc/shadow, /etc/sudoers, /proc/self/environ)
+      output: >
+        Sensitive file read in pinned backend
+        (user=%user.name pod=%k8s.pod.name ns=%k8s.ns.name file=%fd.name)
+      priority: WARNING
+      tags: [pinned, credentials, recon]
+
+    # ── 예상치 못한 아웃바운드 포트 탐지 ─────────────────────────────────────
+    - rule: Unexpected outbound connection from pinned backend
+      desc: 허용된 포트(443, 53) 외 아웃바운드 연결 — 비콘/C2 통신 가능
+      condition: >
+        outbound and
+        container.name = "backend" and
+        not fd.sport in (443, 53, 3307)
+      output: >
+        Unexpected outbound connection from pinned backend
+        (user=%user.name pod=%k8s.pod.name ns=%k8s.ns.name dest=%fd.name)
+      priority: WARNING
+      tags: [pinned, network, c2]
+
+falcosidekick:
+  enabled: true
+
+  serviceAccount:
+    create: false
+    name: falcosidekick   # Workload Identity 어노테이션이 달린 SA 사용
+
+  config:
+    gcp:
+      pubsub:
+        projectid: "pinned-4cf6c"
+        topic: "pinned-gke-alerts"   # 기존 Self-Healer Pub/Sub 토픽 재사용
+
+    customfields: "project:pinned,source:falco"
+    minimumpriority: "warning"       # WARNING 이상만 전송
+
+  webui:
+    enabled: false

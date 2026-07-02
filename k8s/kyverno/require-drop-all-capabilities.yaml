@@ -1,0 +1,26 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-drop-all-capabilities
+  annotations:
+    policies.kyverno.io/description: >
+      pinned 네임스페이스의 모든 컨테이너는 모든 Linux 커널 권한을 반납해야 합니다.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: check-drop-all
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [pinned]
+      validate:
+        message: "securityContext.capabilities.drop: [ALL] 이 필수입니다."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  capabilities:
+                    drop:
+                      - ALL
