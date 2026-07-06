@@ -12,7 +12,7 @@ env:
   PROJECT_ID: project-9c52df7f-9c59-4739-9b4
   REGION: asia-northeast3          # 서울
   CLUSTER: pinned-cluster
-  ARTIFACT_REPO: pinned
+  ARTIFACT_REPO: pinned-app
   IMAGE: backend
 
 jobs:
