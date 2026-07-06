@@ -8,6 +8,7 @@ resource "google_container_cluster" "primary" {
   # 기본 노드풀 제거 후 별도 노드풀에서 관리
   remove_default_node_pool = true
   initial_node_count       = 1
+  deletion_protection      = false
 
   # Workload Identity 활성화
   workload_identity_config {
