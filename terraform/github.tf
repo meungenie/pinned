@@ -67,6 +67,13 @@ resource "google_project_iam_member" "github_actions_editor" {
   member  = "serviceAccount:${google_service_account.github_actions.email}"
 }
 
+# Secret Manager 읽기 권한 (backend-secret 생성 시 DB 비밀번호 조회)
+resource "google_project_iam_member" "github_actions_secretmanager" {
+  project = var.project_id
+  role    = "roles/secretmanager.secretAccessor"
+  member  = "serviceAccount:${google_service_account.github_actions.email}"
+}
+
 # GitHub Actions → GCP SA 위임 바인딩
 resource "google_service_account_iam_member" "github_actions_wif" {
   service_account_id = google_service_account.github_actions.name
