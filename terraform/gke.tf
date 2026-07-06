@@ -11,6 +11,13 @@ resource "google_container_cluster" "primary" {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
 
+  # GKE Security Posture — Autopilot에서 Falco 대신 사용하는 런타임 보안
+  # vulnerability scanning + 런타임 위협 탐지 (컨테이너 이상 행동, 알려진 악성 프로세스)
+  security_posture_config {
+    mode               = "BASIC"
+    vulnerability_mode = "VULNERABILITY_BASIC"
+  }
+
   depends_on = [google_project_service.apis["container.googleapis.com"]]
 }
 
