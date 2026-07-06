@@ -4,4 +4,4 @@ metadata:
   name: falcosidekick
   namespace: falco
   annotations:
-    iam.gke.io/gcp-service-account: pinned-falcosidekick@pinned-4cf6c.iam.gserviceaccount.com
+    iam.gke.io/gcp-service-account: pinned-falcosidekick@project-9c52df7f-9c59-4739-9b4.iam.gserviceaccount.com
