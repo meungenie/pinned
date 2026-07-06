@@ -147,12 +147,27 @@ jobs:
       - name: Apply Kubernetes manifests
         run: |
           kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/backend/serviceaccount.yaml
           kubectl apply -f k8s/backend/backendconfig.yaml
           kubectl apply -f k8s/backend/configmap.yaml
-          kubectl apply -f k8s/backend/deployment.yaml
           kubectl apply -f k8s/backend/service.yaml
           kubectl apply -f k8s/backend/hpa.yaml
           kubectl apply -f k8s/ingress.yaml
+
+      - name: Create backend-secret from Secret Manager
+        run: |
+          DB_PASS=$(gcloud secrets versions access latest \
+            --secret=pinned-db-password \
+            --project=${{ env.PROJECT_ID }})
+          kubectl create secret generic backend-secret \
+            --from-literal=DB_USER=pinned_user \
+            --from-literal=DB_PASSWORD="${DB_PASS}" \
+            -n pinned \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply backend deployment
+        run: |
+          kubectl apply -f k8s/backend/deployment.yaml
 
       - name: Update deployment image
         run: |

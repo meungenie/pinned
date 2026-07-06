@@ -54,7 +54,7 @@ customRules:
       condition: >
         outbound and
         container.name = "backend" and
-        not fd.sport in (443, 53, 3307)
+        not fd.dport in (443, 53, 5432)
       output: >
         Unexpected outbound connection from pinned backend
         (user=%user.name pod=%k8s.pod.name ns=%k8s.ns.name dest=%fd.name)
