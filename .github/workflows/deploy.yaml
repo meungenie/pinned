@@ -238,13 +238,9 @@ jobs:
           kubectl get clusterpolicy >> $GITHUB_STEP_SUMMARY
 
   # ── 6단계: Falco 런타임 보안 배포 ──────────────────────────
-  # GKE Autopilot은 privileged 컨테이너 + hostPath를 차단하므로 Falco 실행 불가
-  # 런타임 보안은 GKE Security Posture(terraform/gke.tf)로 대체
-  # 이 Job은 GKE Standard 환경 대비 코드로 유지 (continue-on-error: true)
   falco:
     needs: kyverno
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4
