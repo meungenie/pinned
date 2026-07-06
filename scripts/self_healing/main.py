@@ -275,32 +275,85 @@ def notify_slack(alert: dict, diagnosis: dict, result: str) -> None:
         print(f"⚠️  Slack 알림 실패: {e}")
 
 
+# ── Falco 이벤트 핸들러 ────────────────────────────────────────────────────────
+
+def is_falco_event(alert: dict) -> bool:
+    return "rule" in alert and "output_fields" in alert
+
+
+def handle_falco_event(alert: dict, k8s: kubernetes.client.ApiClient) -> tuple[dict, str]:
+    rule     = alert.get("rule", "Unknown rule")
+    priority = alert.get("priority", "WARNING").upper()
+    fields   = alert.get("output_fields", {})
+
+    pod_name  = fields.get("k8s.pod.name", "")
+    namespace = fields.get("k8s.ns.name", K8S_NAMESPACE)
+
+    diagnosis = {
+        "diagnosis": f"Falco 보안 이벤트: {rule}",
+        "severity":  "HIGH" if priority in ("CRITICAL", "ERROR") else "MEDIUM",
+        "action":    "no_action",
+        "target":    None,
+        "replicas":  None,
+        "reason":    alert.get("output", ""),
+        "model_used": "falco-rule",
+    }
+
+    result = "조치 없음"
+
+    # WARNING 이상이고 Pod 이름이 확인된 경우 → Pod 삭제 (Deployment가 새 Pod 재생성)
+    if priority in ("CRITICAL", "ERROR", "WARNING") and pod_name:
+        try:
+            core = kubernetes.client.CoreV1Api(k8s)
+            core.delete_namespaced_pod(pod_name, namespace)
+            result = f"보안 위협 Pod '{pod_name}' 격리 완료 (삭제 → Deployment가 재생성)"
+            diagnosis["action"] = "restart_deployment"
+            diagnosis["target"] = "backend"
+            print(f"🛡️  Falco 탐지 → Pod '{pod_name}' 삭제")
+        except kubernetes.client.rest.ApiException as e:
+            result = f"Pod '{pod_name}' 이미 없음" if e.status == 404 else f"Pod 삭제 실패: {e.reason}"
+
+    return diagnosis, result
+
+
 # ── Cloud Function 진입점 ──────────────────────────────────────────────────────
 
 @functions_framework.cloud_event
 def self_heal(cloud_event) -> None:
-    # Pub/Sub 메시지 파싱
-    raw = base64.b64decode(cloud_event.data["message"]["data"]).decode()
+    # Pub/Sub 메시지 파싱 (제어 문자 제거 후 파싱)
+    raw = base64.b64decode(cloud_event.data["message"]["data"]).decode("utf-8", errors="replace")
+    import re as _re
+    raw = _re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", raw)
     alert = json.loads(raw)
-    incident = alert.get("incident", {})
-    resource_name = incident.get("resource", {}).get("labels", {}).get("container_name", "")
-
-    print(f"📡 알림 수신: {incident.get('condition_name', '알 수 없는 조건')}")
-    print(f"   상태: {incident.get('state')}, 리소스: {resource_name}")
 
     try:
         k8s = get_k8s_client()
-        cluster_state = get_cluster_state(k8s)
-        logs = get_recent_logs(resource_name)
 
-        print("🤖 Claude 분석 중...")
-        diagnosis = analyze_with_claude(alert, cluster_state, logs)
-        print(f"   진단: {diagnosis['diagnosis']}")
-        print(f"   조치: {diagnosis['action']} → {diagnosis.get('target')}")
+        # ── Falco 이벤트 (런타임 보안) ──
+        if is_falco_event(alert):
+            rule     = alert.get("rule", "Unknown")
+            priority = alert.get("priority", "?")
+            print(f"🛡️  Falco 이벤트 수신: [{priority}] {rule}")
+            diagnosis, result = handle_falco_event(alert, k8s)
 
-        result = execute_healing(diagnosis, k8s)
+        # ── Cloud Monitoring 알림 (인프라 이상) ──
+        else:
+            incident      = alert.get("incident", {})
+            resource_name = incident.get("resource", {}).get("labels", {}).get("container_name", "")
+            print(f"📡 Monitoring 알림 수신: {incident.get('condition_name', '알 수 없는 조건')}")
+            print(f"   상태: {incident.get('state')}, 리소스: {resource_name}")
+
+            cluster_state = get_cluster_state(k8s)
+            logs          = get_recent_logs(resource_name)
+
+            print("🤖 Claude 분석 중...")
+            diagnosis = analyze_with_claude(alert, cluster_state, logs)
+            print(f"   진단: {diagnosis['diagnosis']}")
+            print(f"   조치: {diagnosis['action']} → {diagnosis.get('target')}")
+
+            result = execute_healing(diagnosis, k8s)
+
         print(f"✅ 복구 결과: {result}")
-
         notify_slack(alert, diagnosis, result)
 
     except Exception as e:

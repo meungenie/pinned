@@ -9,5 +9,3 @@ data:
   DB_HOST: "127.0.0.1"   # Cloud SQL Auth Proxy sidecar
   DB_PORT: "5432"
   DB_NAME: "pinned_db"
-  FIREBASE_PROJECT_ID: "pinned-4cf6c"
-  FIREBASE_STORAGE_BUCKET: "pinned-4cf6c.firebasestorage.app"

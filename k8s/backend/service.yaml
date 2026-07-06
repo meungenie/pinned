@@ -3,6 +3,8 @@ kind: Service
 metadata:
   name: backend
   namespace: pinned
+  annotations:
+    cloud.google.com/backend-config: '{"default": "pinned-backend-config"}'
 spec:
   selector:
     app: backend

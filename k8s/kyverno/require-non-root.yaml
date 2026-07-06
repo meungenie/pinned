@@ -1,0 +1,23 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-non-root
+  annotations:
+    policies.kyverno.io/description: >
+      pinned 네임스페이스의 모든 Pod는 root로 실행될 수 없습니다.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: check-run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [pinned]
+      validate:
+        message: "securityContext.runAsNonRoot: true 가 필수입니다."
+        pattern:
+          spec:
+            securityContext:
+              runAsNonRoot: true

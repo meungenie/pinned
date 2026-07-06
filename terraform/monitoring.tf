@@ -5,11 +5,18 @@ resource "google_pubsub_topic" "gke_alerts" {
   depends_on = [google_project_service.apis["pubsub.googleapis.com"]]
 }
 
+# Monitoring API 활성화 후 서비스 계정 생성까지 대기
+resource "time_sleep" "wait_for_monitoring_sa" {
+  create_duration = "30s"
+  depends_on      = [google_project_service.apis["monitoring.googleapis.com"]]
+}
+
 # Cloud Monitoring이 Pub/Sub에 publish할 수 있도록 권한 부여
 resource "google_pubsub_topic_iam_member" "monitoring_publish" {
   topic  = google_pubsub_topic.gke_alerts.name
   role   = "roles/pubsub.publisher"
   member = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-monitoring-notification.iam.gserviceaccount.com"
+  depends_on = [time_sleep.wait_for_monitoring_sa]
 }
 
 data "google_project" "project" {}
@@ -95,8 +102,8 @@ resource "google_monitoring_alert_policy" "no_pods_running" {
       duration        = "60s"
       aggregations {
         alignment_period     = "60s"
-        per_series_aligner   = "ALIGN_COUNT_TRUE"
-        cross_series_reducer = "REDUCE_SUM"
+        per_series_aligner   = "ALIGN_MEAN"
+        cross_series_reducer = "REDUCE_COUNT"
       }
     }
   }
@@ -124,8 +131,12 @@ resource "google_storage_bucket" "function_source" {
   name                        = "${var.project_id}-function-source"
   location                    = var.region
   uniform_bucket_level_access = true
-  force_destroy               = true
-  depends_on                  = [google_project_service.apis["storage.googleapis.com"]]
+
+  # 소스 버킷도 공개 접근을 항상 차단 (보안 강화)
+  public_access_prevention = "enforced"
+
+  force_destroy = true
+  depends_on    = [google_project_service.apis["storage.googleapis.com"]]
 }
 
 data "archive_file" "self_healing" {
@@ -148,9 +159,45 @@ resource "google_service_account" "self_healer" {
   description  = "AI Self-Healing Cloud Function 전용 서비스 계정"
 }
 
+# 최소 권한 커스텀 역할: 자가복구에 필요한 Pod/Deployment 조회·재시작 권한만 부여
+# (기존 roles/container.developer는 워크로드 변경 권한이 과도하여 축소)
+resource "google_project_iam_custom_role" "self_healer" {
+  role_id     = "pinnedSelfHealer"
+  title       = "Pinned Self-Healer Minimal"
+  description = "Self-Healing Cloud Function이 필요로 하는 최소 GKE 권한"
+  permissions = [
+    "container.clusters.get",
+    "container.clusters.getCredentials",
+    "container.pods.get",
+    "container.pods.list",
+    "container.pods.delete",
+    "container.deployments.get",
+    "container.deployments.list",
+    "container.deployments.update",
+    "container.replicaSets.get",
+    "container.replicaSets.list",
+    "container.events.get",
+    "container.events.list",
+  ]
+}
+
 resource "google_project_iam_member" "self_healer_gke" {
   project = var.project_id
-  role    = "roles/container.developer"
+  role    = google_project_iam_custom_role.self_healer.id
+  member  = "serviceAccount:${google_service_account.self_healer.email}"
+}
+
+# Eventarc 트리거가 Cloud Run 서비스를 호출할 수 있도록 권한 부여
+resource "google_project_iam_member" "self_healer_run_invoker" {
+  project = var.project_id
+  role    = "roles/run.invoker"
+  member  = "serviceAccount:${google_service_account.self_healer.email}"
+}
+
+# Eventarc 이벤트 수신 권한
+resource "google_project_iam_member" "self_healer_eventarc" {
+  project = var.project_id
+  role    = "roles/eventarc.eventReceiver"
   member  = "serviceAccount:${google_service_account.self_healer.email}"
 }
 
@@ -160,10 +207,46 @@ resource "google_project_iam_member" "self_healer_logging" {
   member  = "serviceAccount:${google_service_account.self_healer.email}"
 }
 
+# anthropic_key 시크릿은 self_healer SA만 접근 가능 (최소 권한)
 resource "google_secret_manager_secret_iam_member" "self_healer_secret" {
   secret_id = google_secret_manager_secret.anthropic_key.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.self_healer.email}"
+}
+
+# ── Cloud Build 서비스 계정 권한 ──────────────────────────────────────────────
+
+# Cloud Functions v2 빌드에 사용되는 Compute Engine 기본 서비스 계정 권한 부여
+locals {
+  compute_sa = "${data.google_project.project.number}-compute@developer.gserviceaccount.com"
+}
+
+resource "google_project_iam_member" "compute_sa_builder" {
+  project = var.project_id
+  role    = "roles/cloudbuild.builds.builder"
+  member  = "serviceAccount:${local.compute_sa}"
+}
+
+resource "google_project_iam_member" "compute_sa_logging" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${local.compute_sa}"
+}
+
+resource "google_project_iam_member" "compute_sa_registry" {
+  project = var.project_id
+  role    = "roles/artifactregistry.writer"
+  member  = "serviceAccount:${local.compute_sa}"
+}
+
+# IAM 전파 대기 (GCP IAM 변경은 전파까지 최대 60초 소요)
+resource "time_sleep" "wait_for_cloudbuild_iam" {
+  create_duration = "60s"
+  depends_on = [
+    google_project_iam_member.compute_sa_builder,
+    google_project_iam_member.compute_sa_logging,
+    google_project_iam_member.compute_sa_registry,
+  ]
 }
 
 # ── Cloud Function v2 ─────────────────────────────────────────────────────────
@@ -186,6 +269,7 @@ resource "google_cloudfunctions2_function" "self_healer" {
   service_config {
     min_instance_count    = 0
     max_instance_count    = 3
+    available_memory      = "512Mi"
     timeout_seconds       = 300
     service_account_email = google_service_account.self_healer.email
 
@@ -217,5 +301,6 @@ resource "google_cloudfunctions2_function" "self_healer" {
     google_project_service.apis["cloudfunctions.googleapis.com"],
     google_project_service.apis["run.googleapis.com"],
     google_storage_bucket_object.self_healing_source,
+    time_sleep.wait_for_cloudbuild_iam,
   ]
 }

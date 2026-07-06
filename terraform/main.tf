@@ -14,6 +14,10 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.0"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.9"
+    }
   }
 
   backend "gcs" {
@@ -44,6 +48,7 @@ resource "google_project_service" "apis" {
     "cloudfunctions.googleapis.com",      # Self-Healer Cloud Function
     "run.googleapis.com",                 # Cloud Function v2 런타임
     "cloudbuild.googleapis.com",          # Cloud Function 빌드
+    "eventarc.googleapis.com",            # Cloud Function v2 이벤트 트리거
   ])
 
   service            = each.value

@@ -37,11 +37,15 @@ jobs:
         run: terraform init -input=false
 
       - name: Terraform Plan
+        id: tf-plan
         working-directory: terraform
         run: |
-          terraform plan -input=false -out=tfplan
-          terraform show -json tfplan > plan.json
-        continue-on-error: true
+          if terraform plan -input=false -refresh=false -out=tfplan; then
+            terraform show -json tfplan > plan.json
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "success=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Python 설치
         uses: actions/setup-python@v5
@@ -58,4 +62,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: python ../scripts/ai_terraform_review.py plan.json .
+        run: |
+          if [ "${{ steps.tf-plan.outputs.success }}" != "true" ]; then
+            echo "⚠️ terraform plan 실패 — AI 리뷰를 건너뜁니다"
+            exit 0
+          fi
+          python ../scripts/ai_terraform_review.py plan.json .

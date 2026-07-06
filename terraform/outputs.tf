@@ -31,3 +31,13 @@ output "workload_identity_provider" {
   description = "GitHub Actions 워크플로우의 workload_identity_provider 값"
   value       = google_iam_workload_identity_pool_provider.github.name
 }
+
+output "waf_policy_name" {
+  description = "Cloud Armor WAF 보안 정책 이름 (BackendConfig와 일치해야 함)"
+  value       = google_compute_security_policy.waf.name
+}
+
+output "waf_policy_selflink" {
+  description = "Cloud Armor WAF 보안 정책 Self-Link (GCP 콘솔 직접 확인용)"
+  value       = google_compute_security_policy.waf.self_link
+}
