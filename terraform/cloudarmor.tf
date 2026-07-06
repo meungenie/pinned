@@ -73,7 +73,8 @@ resource "google_compute_security_policy" "waf" {
 
   # ── Rate Limiting ────────────────────────────────────────────────────────────
   # IP당 60초에 100 요청 초과 시 429 응답
-  # 정상 사용자는 영향 없고 스크래퍼/브루트포스 차단
+  # enforce_on_key = "IP" 를 반드시 지정해야 '출발지 IP 단위'로 집계됨.
+  # (미지정 시 기본값 ALL → 전체 트래픽 합산으로 집계되어 정상 사용자까지 차단되는 오작동 발생)
   rule {
     action      = "throttle"
     priority    = 9000
@@ -87,6 +88,7 @@ resource "google_compute_security_policy" "waf" {
     rate_limit_options {
       conform_action = "allow"
       exceed_action  = "deny(429)"
+      enforce_on_key = "IP"
       rate_limit_threshold {
         count        = 100
         interval_sec = 60
@@ -95,6 +97,8 @@ resource "google_compute_security_policy" "waf" {
   }
 
   # ── 기본 허용 (필수 규칙) ────────────────────────────────────────────────────
+  # 기본 action은 allow 로 유지하여 WAF 규칙에 걸리지 않은 정상 트래픽은 통과.
+  # (기본 deny 로 두면 백엔드 전체 서비스 장애 위험이 있어 의도적으로 allow 유지)
   rule {
     action      = "allow"
     priority    = 2147483647
