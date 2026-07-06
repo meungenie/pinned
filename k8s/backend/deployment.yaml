@@ -71,7 +71,8 @@ spec:
           args:
             - "--structured-logs"
             - "--port=5432"
-            - "PROJECT_ID:REGION:pinned-db"  # Cloud SQL 인스턴스 연결 이름
+            - "--private-ip"
+            - "project-9c52df7f-9c59-4739-9b4:asia-northeast3:pinned-postgres"
           resources:
             requests:
               cpu: "50m"

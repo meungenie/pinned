@@ -32,7 +32,7 @@ spec:
         - port: 443
           protocol: TCP
 
-    # Cloud SQL Proxy fallback port
+    # Cloud SQL Auth Proxy → PostgreSQL (private IP)
     - ports:
-        - port: 3307
+        - port: 5432
           protocol: TCP

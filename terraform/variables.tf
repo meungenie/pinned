@@ -20,12 +20,12 @@ variable "cluster_name" {
 
 variable "k8s_namespace" {
   description = "Kubernetes 네임스페이스"
-  default     = "default"
+  default     = "pinned"
 }
 
 variable "k8s_service_account" {
   description = "Workload Identity에 연결할 K8s 서비스 계정 이름"
-  default     = "pinned-backend"
+  default     = "pinned-sa"
 }
 
 variable "github_repo" {

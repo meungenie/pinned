@@ -19,6 +19,13 @@ resource "google_secret_manager_secret_iam_member" "backend_db_password" {
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
 
+# Cloud SQL 연결 권한 (Cloud SQL Auth Proxy 사용)
+resource "google_project_iam_member" "backend_cloudsql" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # Workload Identity 바인딩
 # K8s 서비스 계정 → GCP 서비스 계정으로 권한 위임
 # 파드에 JSON 키 없이 GCP API 사용 가능
