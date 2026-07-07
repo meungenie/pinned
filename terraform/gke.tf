@@ -1,17 +1,58 @@
-# GKE Autopilot 클러스터
-# Autopilot = 노드 관리 불필요, 실무에서 많이 사용하는 managed 방식
+# GKE Standard 클러스터
+# Falco 등 DaemonSet 기반 보안 에이전트 실행을 위해 Standard 선택
+# (Autopilot은 privileged 컨테이너 + hostPath 차단 → Falco 동작 불가)
 resource "google_container_cluster" "primary" {
   name     = var.cluster_name
   location = var.region
 
-  enable_autopilot = true
+  # 기본 노드풀 제거 후 별도 노드풀에서 관리
+  remove_default_node_pool = true
+  initial_node_count       = 1
+  deletion_protection      = false
 
-  # Workload Identity 활성화 (pod가 GCP 서비스 계정 권한을 키 파일 없이 사용)
+  # Workload Identity 활성화
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
 
+  # 이미지 취약점 스캔 + 런타임 위협 탐지 (Falco 보완)
+  security_posture_config {
+    mode               = "BASIC"
+    vulnerability_mode = "VULNERABILITY_BASIC"
+  }
+
   depends_on = [google_project_service.apis["container.googleapis.com"]]
+}
+
+resource "google_container_node_pool" "primary_nodes" {
+  name     = "default-pool"
+  location = var.region
+  cluster  = google_container_cluster.primary.name
+
+  node_count = 2
+
+  node_config {
+    machine_type = "e2-medium"
+
+    # COS_CONTAINERD: Falco modern_ebpf 드라이버 지원
+    image_type    = "COS_CONTAINERD"
+    disk_type     = "pd-standard"   # SSD 할당량 절약
+    disk_size_gb  = 50
+
+    # Workload Identity 활성화
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
+
+    oauth_scopes = [
+      "https://www.googleapis.com/auth/cloud-platform",
+    ]
+  }
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
 }
 
 # Docker 이미지 저장소 (Artifact Registry)
