@@ -278,7 +278,7 @@ jobs:
             --namespace falco \
             --version 4.18.0 \
             -f k8s/falco/values.yaml \
-            --wait --timeout 5m
+            --wait --timeout 10m
 
       - name: Falco summary
         run: |
