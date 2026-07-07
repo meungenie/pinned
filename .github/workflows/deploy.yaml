@@ -167,13 +167,8 @@ jobs:
 
       - name: Apply backend deployment
         run: |
-          kubectl apply -f k8s/backend/deployment.yaml
-
-      - name: Update deployment image
-        run: |
-          kubectl set image deployment/backend \
-            backend=${{ needs.build-push.outputs.image }} \
-            -n pinned
+          sed "s|REGION-docker.pkg.dev/PROJECT_ID/pinned/backend:latest|${{ needs.build-push.outputs.image }}|g" \
+            k8s/backend/deployment.yaml | kubectl apply -f -
 
       - name: Wait for rollout
         run: |
