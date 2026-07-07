@@ -219,7 +219,7 @@ jobs:
             --namespace kyverno \
             --create-namespace \
             --version 3.2.6 \
-            --wait --timeout 5m
+            --wait --timeout 10m
 
       - name: Apply Kyverno policies
         run: |
