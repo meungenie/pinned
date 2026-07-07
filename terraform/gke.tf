@@ -35,7 +35,9 @@ resource "google_container_node_pool" "primary_nodes" {
     machine_type = "e2-medium"
 
     # COS_CONTAINERD: Falco modern_ebpf 드라이버 지원
-    image_type = "COS_CONTAINERD"
+    image_type    = "COS_CONTAINERD"
+    disk_type     = "pd-standard"   # SSD 할당량 절약
+    disk_size_gb  = 50
 
     # Workload Identity 활성화
     workload_metadata_config {
