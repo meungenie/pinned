@@ -152,14 +152,11 @@ jobs:
 
       - name: Cleanup broken Kyverno state
         run: |
-          # stuck된 Helm release 초기화 (pending-upgrade/pending-install 상태)
-          STATUS=$(helm status kyverno -n kyverno 2>/dev/null | grep STATUS | awk '{print $2}' || echo "not-found")
-          if [[ "$STATUS" == "pending-upgrade" || "$STATUS" == "pending-install" || "$STATUS" == "pending-rollback" ]]; then
-            helm rollback kyverno 0 -n kyverno || helm uninstall kyverno -n kyverno || true
-          fi
-          # 깨진 webhook 설정 삭제
+          helm uninstall kyverno -n kyverno 2>/dev/null || true
           kubectl get validatingwebhookconfigurations -o name 2>/dev/null | grep kyverno | xargs kubectl delete --ignore-not-found || true
           kubectl get mutatingwebhookconfigurations -o name 2>/dev/null | grep kyverno | xargs kubectl delete --ignore-not-found || true
+          kubectl delete crd -l app.kubernetes.io/name=kyverno --ignore-not-found 2>/dev/null || true
+          sleep 15
 
       - name: Install Kyverno
         run: |
