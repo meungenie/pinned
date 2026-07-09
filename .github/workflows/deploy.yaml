@@ -124,9 +124,65 @@ jobs:
           python scripts/trivy_ai_review.py trivy-report.json \
             "${{ needs.build-push.outputs.image }}"
 
-  # ── 4단계: GKE 배포 ────────────────────────────────────
-  deploy:
+  # ── 4단계: Kyverno 정책 배포 (deploy 전에 먼저 실행) ──────────────────────────
+  # Kyverno webhook이 없는 상태에서 deploy가 실행돼야 정책 검증 오류 없음
+  kyverno:
     needs: [build-push, security-scan]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.14.0"
+
+      - name: Cleanup broken Kyverno webhooks
+        run: |
+          kubectl get validatingwebhookconfigurations -o name | grep kyverno | xargs kubectl delete --ignore-not-found || true
+          kubectl get mutatingwebhookconfigurations -o name | grep kyverno | xargs kubectl delete --ignore-not-found || true
+
+      - name: Install Kyverno
+        run: |
+          helm repo add kyverno https://kyverno.github.io/kyverno
+          helm repo update
+          helm upgrade --install kyverno kyverno/kyverno \
+            --namespace kyverno \
+            --create-namespace \
+            --version 3.2.6 \
+            --set admissionController.replicas=1 \
+            --set backgroundController.replicas=1 \
+            --set cleanupController.replicas=1 \
+            --set reportsController.replicas=1 \
+            --wait --timeout 10m
+
+      - name: Apply Kyverno policies
+        run: |
+          kubectl apply -f k8s/kyverno/require-non-root.yaml
+          kubectl apply -f k8s/kyverno/require-drop-all-capabilities.yaml
+          kubectl apply -f k8s/kyverno/disallow-privilege-escalation.yaml
+
+      - name: Kyverno summary
+        run: |
+          echo "### Kyverno 정책 배포 완료" >> $GITHUB_STEP_SUMMARY
+          kubectl get clusterpolicy >> $GITHUB_STEP_SUMMARY
+
+  # ── 5단계: GKE 배포 ────────────────────────────────────
+  deploy:
+    needs: [kyverno]
     runs-on: ubuntu-latest
 
     steps:
@@ -186,59 +242,9 @@ jobs:
           echo "- 클러스터: ${{ env.CLUSTER }}" >> $GITHUB_STEP_SUMMARY
           kubectl get pods -n pinned >> $GITHUB_STEP_SUMMARY
 
-  # ── 5단계: Kyverno 정책 배포 ──────────────────────────────
-  kyverno:
-    needs: deploy
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Google Auth
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-
-      - name: Get GKE credentials
-        uses: google-github-actions/get-gke-credentials@v2
-        with:
-          cluster_name: ${{ env.CLUSTER }}
-          location: ${{ env.REGION }}
-
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: "3.14.0"
-
-      - name: Install Kyverno
-        run: |
-          helm repo add kyverno https://kyverno.github.io/kyverno
-          helm repo update
-          helm upgrade --install kyverno kyverno/kyverno \
-            --namespace kyverno \
-            --create-namespace \
-            --version 3.2.6 \
-            --set admissionController.replicas=1 \
-            --set backgroundController.replicas=1 \
-            --set cleanupController.replicas=1 \
-            --set reportsController.replicas=1 \
-            --wait --timeout 10m
-
-      - name: Apply Kyverno policies
-        run: |
-          kubectl apply -f k8s/kyverno/require-non-root.yaml
-          kubectl apply -f k8s/kyverno/require-drop-all-capabilities.yaml
-          kubectl apply -f k8s/kyverno/disallow-privilege-escalation.yaml
-
-      - name: Kyverno summary
-        run: |
-          echo "### Kyverno 정책 배포 완료" >> $GITHUB_STEP_SUMMARY
-          kubectl get clusterpolicy >> $GITHUB_STEP_SUMMARY
-
   # ── 6단계: Falco 런타임 보안 배포 ──────────────────────────
   falco:
-    needs: kyverno
+    needs: deploy
     runs-on: ubuntu-latest
 
     steps:
