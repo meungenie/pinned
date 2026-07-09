@@ -170,7 +170,9 @@ jobs:
             --set backgroundController.replicas=1 \
             --set cleanupController.replicas=1 \
             --set reportsController.replicas=1 \
-            --wait --timeout 10m
+            --no-hooks \
+            --timeout 10m
+          kubectl rollout status deployment/kyverno-admission-controller -n kyverno --timeout=5m
 
       - name: Apply Kyverno policies
         run: |
