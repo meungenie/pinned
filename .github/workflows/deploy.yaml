@@ -150,10 +150,16 @@ jobs:
         with:
           version: "3.14.0"
 
-      - name: Cleanup broken Kyverno webhooks
+      - name: Cleanup broken Kyverno state
         run: |
-          kubectl get validatingwebhookconfigurations -o name | grep kyverno | xargs kubectl delete --ignore-not-found || true
-          kubectl get mutatingwebhookconfigurations -o name | grep kyverno | xargs kubectl delete --ignore-not-found || true
+          # stuck된 Helm release 초기화 (pending-upgrade/pending-install 상태)
+          STATUS=$(helm status kyverno -n kyverno 2>/dev/null | grep STATUS | awk '{print $2}' || echo "not-found")
+          if [[ "$STATUS" == "pending-upgrade" || "$STATUS" == "pending-install" || "$STATUS" == "pending-rollback" ]]; then
+            helm rollback kyverno 0 -n kyverno || helm uninstall kyverno -n kyverno || true
+          fi
+          # 깨진 webhook 설정 삭제
+          kubectl get validatingwebhookconfigurations -o name 2>/dev/null | grep kyverno | xargs kubectl delete --ignore-not-found || true
+          kubectl get mutatingwebhookconfigurations -o name 2>/dev/null | grep kyverno | xargs kubectl delete --ignore-not-found || true
 
       - name: Install Kyverno
         run: |
