@@ -3,24 +3,7 @@ driver:
 
 collectors:
   kubernetes:
-    enabled: true     # Pod/Deployment 메타데이터를 이벤트에 포함
-
-falcoctl:
-  config:
-    artifact:
-      allowedTypes:
-        - rulesfile
-        - plugin
-      install:
-        enabled: true
-        resolveDeps: true
-        refs:
-          - "falco-rules:3"
-          - "ghcr.io/falcosecurity/plugins/plugin/k8smeta:0.2.1"
-      follow:
-        enabled: true
-        refs:
-          - "falco-rules:3"
+    enabled: false    # k8smeta 플러그인 의존성 제거 (GKE 호환성)
 
 customRules:
   pinned-rules.yaml: |

@@ -291,7 +291,7 @@ jobs:
             --version 4.18.0 \
             -f k8s/falco/values.yaml \
             --timeout 10m
-          kubectl rollout status daemonset/falco -n falco --timeout=5m
+          kubectl rollout status daemonset/falco -n falco --timeout=8m
           kubectl rollout status deployment/falco-falcosidekick -n falco --timeout=5m
 
       - name: Falco summary
