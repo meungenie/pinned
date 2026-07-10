@@ -1,9 +1,6 @@
 driver:
   kind: modern_ebpf   # GKE COS 노드에서 커널 모듈 없이 동작
 
-falco:
-  privileged: true    # eBPF 드라이버가 GKE 노드에서 커널 접근하려면 필요
-
 collectors:
   kubernetes:
     enabled: false    # k8smeta 플러그인 의존성 제거 (GKE 호환성)
@@ -57,7 +54,7 @@ customRules:
       condition: >
         outbound and
         container.name = "backend" and
-        not fd.dport in (443, 53, 5432)
+        not fd.rport in (443, 53, 5432)
       output: >
         Unexpected outbound connection from pinned backend
         (user=%user.name pod=%k8s.pod.name ns=%k8s.ns.name dest=%fd.name)
