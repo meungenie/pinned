@@ -331,10 +331,6 @@ jobs:
         with:
           version: "3.14.0"
 
-      - name: Apply Cloud Logging config
-        run: |
-          kubectl apply -f k8s/monitoring/cloud-logging-export.yaml
-
       - name: Deploy kube-prometheus-stack
         run: |
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
@@ -347,6 +343,7 @@ jobs:
             --timeout 10m
           kubectl rollout status deployment/prometheus-grafana -n monitoring --timeout=5m
           kubectl rollout status statefulset/prometheus-prometheus-kube-prometheus-prometheus -n monitoring --timeout=5m
+          kubectl apply -f k8s/monitoring/cloud-logging-export.yaml
 
       - name: Monitoring summary
         run: |
