@@ -351,3 +351,56 @@ jobs:
           kubectl get pods -n monitoring >> $GITHUB_STEP_SUMMARY
           GRAFANA_IP=$(kubectl get svc prometheus-grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
           echo "- Grafana: http://${GRAFANA_IP} (admin / pinned-grafana-admin)" >> $GITHUB_STEP_SUMMARY
+
+  # ── 8단계: Slack Bot Cloud Run 배포 ────────────────────────────
+  slack-bot:
+    needs: monitoring
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Deploy Slack Bot to Cloud Run
+        run: |
+          gcloud run deploy pinned-slack-bot \
+            --source scripts/slack_bot \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars "PROJECT_ID=${{ env.PROJECT_ID }},CLUSTER_NAME=${{ env.CLUSTER }},CLUSTER_REGION=${{ env.REGION }},K8S_NAMESPACE=pinned,SLACK_CHANNEL=#gke-alerts" \
+            --set-secrets "SLACK_BOT_TOKEN=slack-bot-token:latest,SLACK_SIGNING_SECRET=slack-signing-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest" \
+            --quiet
+
+      - name: Setup Cloud Scheduler for daily briefing
+        run: |
+          gcloud scheduler jobs create http pinned-daily-briefing \
+            --location=${{ env.REGION }} \
+            --schedule="0 0 * * *" \
+            --time-zone="Asia/Seoul" \
+            --uri="$(gcloud run services describe pinned-slack-bot --region=${{ env.REGION }} --format='value(status.url)')/daily-briefing" \
+            --http-method=POST \
+            --message-body="{}" \
+            --headers="Content-Type=application/json" \
+            2>/dev/null || \
+          gcloud scheduler jobs update http pinned-daily-briefing \
+            --location=${{ env.REGION }} \
+            --schedule="0 0 * * *" \
+            --time-zone="Asia/Seoul" \
+            --uri="$(gcloud run services describe pinned-slack-bot --region=${{ env.REGION }} --format='value(status.url)')/daily-briefing" \
+            --http-method=POST \
+            --message-body="{}" \
+            --headers="Content-Type=application/json"
+
+      - name: Slack Bot summary
+        run: |
+          echo "### Slack Bot 배포 완료" >> $GITHUB_STEP_SUMMARY
+          BOT_URL=$(gcloud run services describe pinned-slack-bot --region=${{ env.REGION }} --format='value(status.url)')
+          echo "- Events URL: ${BOT_URL}/slack/events" >> $GITHUB_STEP_SUMMARY
+          echo "- Interactivity URL: ${BOT_URL}/slack/interactivity" >> $GITHUB_STEP_SUMMARY
+          echo "- Daily briefing: 매일 09:00 KST 자동 전송" >> $GITHUB_STEP_SUMMARY

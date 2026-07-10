@@ -20,11 +20,13 @@ from google.cloud import container_v1, logging as cloud_logging
 import kubernetes.client
 import kubernetes.client.rest
 
-PROJECT_ID    = os.environ["PROJECT_ID"]
-CLUSTER_NAME  = os.environ["CLUSTER_NAME"]
+PROJECT_ID     = os.environ["PROJECT_ID"]
+CLUSTER_NAME   = os.environ["CLUSTER_NAME"]
 CLUSTER_REGION = os.environ["CLUSTER_REGION"]
-K8S_NAMESPACE = os.environ.get("K8S_NAMESPACE", "pinned")
-SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK", "")
+K8S_NAMESPACE  = os.environ.get("K8S_NAMESPACE", "pinned")
+SLACK_WEBHOOK  = os.environ.get("SLACK_WEBHOOK", "")
+SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
+SLACK_CHANNEL  = os.environ.get("SLACK_CHANNEL", "#gke-alerts")
 
 ai_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
@@ -242,37 +244,101 @@ def execute_healing(diagnosis: dict, k8s: kubernetes.client.ApiClient) -> str:
     return f"알 수 없는 액션: {action}"
 
 
-# ── Slack 알림 ─────────────────────────────────────────────────────────────────
+# ── Slack 알림 / 승인 요청 ──────────────────────────────────────────────────────
 
 def notify_slack(alert: dict, diagnosis: dict, result: str) -> None:
+    """단순 결과 알림 (웹훅 방식, 버튼 없음)"""
     if not SLACK_WEBHOOK:
         print("ℹ️  SLACK_WEBHOOK 없음 — Slack 알림 스킵")
         return
 
     severity_emoji = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴"}.get(diagnosis.get("severity"), "⚪")
-    action_emoji = "🔧" if diagnosis.get("action") != "no_action" else "✅"
+    action_emoji   = "🔧" if diagnosis.get("action") != "no_action" else "✅"
 
     payload = {
         "text": f"{severity_emoji} *GKE Self-Healing 알림*",
-        "attachments": [
-            {
-                "color": {"LOW": "good", "MEDIUM": "warning", "HIGH": "danger"}.get(diagnosis.get("severity"), "#ccc"),
-                "fields": [
-                    {"title": "진단", "value": diagnosis.get("diagnosis", "-"), "short": False},
-                    {"title": f"{action_emoji} 조치 결과", "value": result, "short": False},
-                    {"title": "이유", "value": diagnosis.get("reason", "-"), "short": False},
-                    {"title": "분석 모델", "value": diagnosis.get("model_used", "-"), "short": True},
-                    {"title": "위험도", "value": diagnosis.get("severity", "-"), "short": True},
-                ],
-            }
-        ],
+        "attachments": [{
+            "color": {"LOW": "good", "MEDIUM": "warning", "HIGH": "danger"}.get(diagnosis.get("severity"), "#ccc"),
+            "fields": [
+                {"title": "진단",       "value": diagnosis.get("diagnosis", "-"), "short": False},
+                {"title": f"{action_emoji} 조치 결과", "value": result,          "short": False},
+                {"title": "이유",       "value": diagnosis.get("reason", "-"),    "short": False},
+                {"title": "분석 모델",  "value": diagnosis.get("model_used", "-"),"short": True},
+                {"title": "위험도",     "value": diagnosis.get("severity", "-"),  "short": True},
+            ],
+        }],
     }
-
     try:
         requests.post(SLACK_WEBHOOK, json=payload, timeout=5)
         print("✅ Slack 알림 전송 완료")
     except Exception as e:
         print(f"⚠️  Slack 알림 실패: {e}")
+
+
+def request_approval(diagnosis: dict) -> None:
+    """HIGH 심각도 인프라 알림 → Slack 승인 버튼 전송 (slack_bot이 버튼 콜백 처리)"""
+    if not SLACK_BOT_TOKEN:
+        print("ℹ️  SLACK_BOT_TOKEN 없음 — 승인 요청 스킵, 자동 실행으로 대체")
+        return False
+
+    severity_emoji = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴"}.get(diagnosis.get("severity"), "⚪")
+    action_payload = json.dumps({
+        "action":    diagnosis.get("action"),
+        "target":    diagnosis.get("target"),
+        "replicas":  diagnosis.get("replicas"),
+        "namespace": K8S_NAMESPACE,
+    })
+
+    blocks = [
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": (
+                f"{severity_emoji} *GKE 이상 감지 — 복구 승인 요청*\n"
+                f"*진단:* {diagnosis.get('diagnosis')}"
+            )},
+        },
+        {
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"*위험도:* {diagnosis.get('severity')}"},
+                {"type": "mrkdwn", "text": f"*제안 조치:* `{diagnosis.get('action')}`"},
+                {"type": "mrkdwn", "text": f"*대상:* `{diagnosis.get('target')}`"},
+                {"type": "mrkdwn", "text": f"*이유:* {diagnosis.get('reason')}"},
+            ],
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "✅ 승인"},
+                    "style": "primary",
+                    "action_id": "approve_healing",
+                    "value": action_payload,
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "🚫 거부"},
+                    "style": "danger",
+                    "action_id": "deny_healing",
+                    "value": "deny",
+                },
+            ],
+        },
+    ]
+
+    try:
+        resp = requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json"},
+            json={"channel": SLACK_CHANNEL, "blocks": blocks},
+            timeout=5,
+        )
+        print("✅ Slack 승인 요청 전송 완료")
+        return True
+    except Exception as e:
+        print(f"⚠️  Slack 승인 요청 실패: {e}")
+        return False
 
 
 # ── Falco 이벤트 핸들러 ────────────────────────────────────────────────────────
@@ -351,7 +417,12 @@ def self_heal(cloud_event) -> None:
             print(f"   진단: {diagnosis['diagnosis']}")
             print(f"   조치: {diagnosis['action']} → {diagnosis.get('target')}")
 
-            result = execute_healing(diagnosis, k8s)
+            # HIGH 심각도 → 사람이 승인 후 실행 / LOW·MEDIUM → 즉시 자동 실행
+            if diagnosis.get("severity") == "HIGH" and diagnosis.get("action") != "no_action":
+                approved = request_approval(diagnosis)
+                result = "⏳ Slack 승인 대기 중" if approved else execute_healing(diagnosis, k8s)
+            else:
+                result = execute_healing(diagnosis, k8s)
 
         print(f"✅ 복구 결과: {result}")
         notify_slack(alert, diagnosis, result)
