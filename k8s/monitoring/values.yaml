@@ -1,0 +1,39 @@
+grafana:
+  enabled: true
+  adminPassword: "pinned-grafana-admin"
+  service:
+    type: LoadBalancer
+  defaultDashboardsEnabled: true
+
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    resources:
+      requests:
+        cpu: 200m
+        memory: 400Mi
+    additionalScrapeConfigs:
+      # Falcosidekick 보안 이벤트 메트릭 수집
+      - job_name: falcosidekick
+        static_configs:
+          - targets:
+              - falco-falcosidekick.falco.svc.cluster.local:2802
+
+alertmanager:
+  enabled: true
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true
+
+# GKE 관리형 컨트롤 플레인은 접근 불가 → 비활성화
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false

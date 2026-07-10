@@ -305,3 +305,52 @@ jobs:
         run: |
           echo "### Falco 런타임 보안 배포 완료" >> $GITHUB_STEP_SUMMARY
           kubectl get pods -n falco >> $GITHUB_STEP_SUMMARY
+
+  # ── 7단계: Prometheus + Grafana 모니터링 ────────────────────────
+  monitoring:
+    needs: [deploy, falco]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.14.0"
+
+      - name: Apply Cloud Logging config
+        run: |
+          kubectl apply -f k8s/monitoring/cloud-logging-export.yaml
+
+      - name: Deploy kube-prometheus-stack
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+            --namespace monitoring \
+            --create-namespace \
+            --version 65.3.1 \
+            -f k8s/monitoring/values.yaml \
+            --timeout 10m
+          kubectl rollout status deployment/prometheus-grafana -n monitoring --timeout=5m
+          kubectl rollout status statefulset/prometheus-prometheus-kube-prometheus-prometheus -n monitoring --timeout=5m
+
+      - name: Monitoring summary
+        run: |
+          echo "### 모니터링 스택 배포 완료" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n monitoring >> $GITHUB_STEP_SUMMARY
+          GRAFANA_IP=$(kubectl get svc prometheus-grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
+          echo "- Grafana: http://${GRAFANA_IP} (admin / pinned-grafana-admin)" >> $GITHUB_STEP_SUMMARY
