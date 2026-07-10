@@ -152,7 +152,9 @@ jobs:
 
       - name: Cleanup broken Kyverno state
         run: |
-          helm uninstall kyverno -n kyverno 2>/dev/null || true
+          helm uninstall kyverno -n kyverno --no-hooks 2>/dev/null || true
+          # helm uninstall이 실패해도 Helm 릴리즈 시크릿을 직접 삭제해서 stuck 상태 해소
+          kubectl delete secret -n kyverno -l name=kyverno,owner=helm --ignore-not-found 2>/dev/null || true
           kubectl get validatingwebhookconfigurations -o name 2>/dev/null | grep kyverno | xargs kubectl delete --ignore-not-found || true
           kubectl get mutatingwebhookconfigurations -o name 2>/dev/null | grep kyverno | xargs kubectl delete --ignore-not-found || true
           kubectl delete crd -l app.kubernetes.io/name=kyverno --ignore-not-found 2>/dev/null || true
