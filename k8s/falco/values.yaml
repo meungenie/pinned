@@ -1,6 +1,9 @@
 driver:
   kind: modern_ebpf   # GKE COS 노드에서 커널 모듈 없이 동작
 
+falco:
+  privileged: true    # eBPF 드라이버가 GKE 노드에서 커널 접근하려면 필요
+
 collectors:
   kubernetes:
     enabled: false    # k8smeta 플러그인 의존성 제거 (GKE 호환성)
