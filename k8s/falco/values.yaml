@@ -5,6 +5,16 @@ collectors:
   kubernetes:
     enabled: true     # Pod/Deployment 메타데이터를 이벤트에 포함
 
+falcoctl:
+  artifact:
+    install:
+      refs:
+        - falco-rules:3
+        - "ghcr.io/falcosecurity/plugins/plugin/k8smeta:0.2.1"
+    follow:
+      refs:
+        - falco-rules:3
+
 customRules:
   pinned-rules.yaml: |
     # ── 쉘 실행 탐지 ───────────────────────────────────────────────────────────
