@@ -74,7 +74,7 @@ falcosidekick:
         projectid: "project-9c52df7f-9c59-4739-9b4"
         topic: "pinned-gke-alerts"   # 기존 Self-Healer Pub/Sub 토픽 재사용
 
-    customfields: "project:pinned,source:falco"
+    customfields: "project:pinned"
     minimumpriority: "warning"       # WARNING 이상만 전송
 
   webui:
