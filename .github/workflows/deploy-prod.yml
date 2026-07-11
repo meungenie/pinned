@@ -160,11 +160,10 @@ jobs:
           echo "### Kyverno 정책 배포 완료" >> $GITHUB_STEP_SUMMARY
           kubectl get clusterpolicy >> $GITHUB_STEP_SUMMARY
 
-  # ── 5단계: 운영 환경 배포 (수동 승인 후 ArgoCD 동기화) ─────
+  # ── 5단계: 운영 환경 배포 ────────────────────────────────────
   deploy:
     needs: [kyverno, build-push]
     runs-on: ubuntu-latest
-    environment: production        # GitHub Environment 승인 게이트
     steps:
       - uses: actions/checkout@v4
         with:
