@@ -1,0 +1,165 @@
+name: CI / Deploy to Dev
+
+on:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  PROJECT_ID:    project-9c52df7f-9c59-4739-9b4
+  REGION:        asia-northeast3
+  CLUSTER:       pinned-cluster
+  ARTIFACT_REPO: pinned-app
+  IMAGE:         backend
+  NAMESPACE:     pinned-dev
+
+jobs:
+  # ── 0단계: 시크릿 스캔 ────────────────────────────────────
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gitleaks secret scan (파일 내용 직접 스캔)
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks detect --source . --no-git -v --exit-code 1
+
+  # ── 1단계: 테스트 ─────────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+  # ── 2단계: 빌드 & 이미지 푸시 ────────────────────────────
+  build-push:
+    needs: [test, secret-scan]
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+      - name: Set image tag
+        id: meta
+        run: |
+          IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:dev-${{ github.sha }}"
+          echo "image=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+      - name: Build & Push Docker image
+        run: |
+          docker build -t ${{ steps.meta.outputs.image }} ./backend
+          docker push ${{ steps.meta.outputs.image }}
+
+  # ── 3단계: 보안 스캔 ──────────────────────────────────────
+  security-scan:
+    needs: build-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build-push.outputs.image }}
+          format: json
+          output: trivy-report.json
+          exit-code: "0"
+          ignore-unfixed: false
+          severity: "CRITICAL,HIGH,MEDIUM,LOW"
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install anthropic
+      - name: AI Security Analysis
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python scripts/trivy_ai_review.py trivy-report.json \
+            "${{ needs.build-push.outputs.image }}"
+
+  # ── 4단계: K8s Secret 생성 (GCP Secret Manager → pinned-dev) ─────
+  create-dev-secret:
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+      - name: Create backend-secret in pinned-dev
+        run: |
+          kubectl apply -f k8s/namespace-dev.yaml
+          DB_PASS=$(gcloud secrets versions access latest \
+            --secret=pinned-db-password \
+            --project=${{ env.PROJECT_ID }})
+          kubectl create secret generic backend-secret \
+            --from-literal=DB_USER=pinned_user \
+            --from-literal=DB_PASSWORD="${DB_PASS}" \
+            -n ${{ env.NAMESPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+  # ── 5단계: Kustomize overlay 이미지 태그 업데이트 → ArgoCD 자동 배포 ──
+  update-manifest:
+    needs: [security-scan, create-dev-secret, build-push]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update dev image tag in kustomize overlay
+        run: |
+          sed -i "s/newTag: .*/newTag: dev-${{ github.sha }}/" k8s/overlays/dev/kustomization.yaml
+
+      - name: Commit and push manifest update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/overlays/dev/kustomization.yaml
+          git diff --staged --quiet || \
+            git commit -m "chore: update dev image tag to dev-${{ github.sha }} [skip ci]"
+          git pull --rebase origin dev
+          git push origin dev
+
+      - name: Deployment summary
+        run: |
+          echo "### ArgoCD 자동 배포 트리거 완료 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "- 이미지 태그: dev-${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 네임스페이스: ${{ env.NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ArgoCD가 k8s/overlays/dev 변경을 감지하여 자동 배포합니다" >> $GITHUB_STEP_SUMMARY

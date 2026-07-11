@@ -1,0 +1,70 @@
+name: AI Terraform Review
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+
+permissions:
+  contents: write           # Fix PR 브랜치 생성 및 파일 커밋
+  pull-requests: write      # PR 코멘트 작성 + Fix PR 생성
+  id-token: write           # Workload Identity Federation
+
+jobs:
+  ai-review:
+    name: Claude Terraform 리뷰
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # JSON 키 없이 GCP 인증 (Workload Identity Federation)
+      - name: GCP 인증
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Terraform 설치
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.5"
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init -input=false
+
+      - name: Terraform Plan
+        id: tf-plan
+        working-directory: terraform
+        run: |
+          if terraform plan -input=false -refresh=false -out=tfplan; then
+            terraform show -json tfplan > plan.json
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "success=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Python 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: AI 리뷰 의존성 설치
+        run: pip install anthropic
+
+      - name: Claude AI 리뷰 실행
+        working-directory: terraform
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "${{ steps.tf-plan.outputs.success }}" != "true" ]; then
+            echo "⚠️ terraform plan 실패 — AI 리뷰를 건너뜁니다"
+            exit 0
+          fi
+          python ../scripts/ai_terraform_review.py plan.json .

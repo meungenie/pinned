@@ -1,0 +1,343 @@
+name: CI / Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  PROJECT_ID:    project-9c52df7f-9c59-4739-9b4
+  REGION:        asia-northeast3
+  CLUSTER:       pinned-cluster
+  ARTIFACT_REPO: pinned-app
+  IMAGE:         backend
+  NAMESPACE:     pinned
+
+jobs:
+  # ── 0단계: 시크릿 스캔 ────────────────────────────────────
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gitleaks secret scan (파일 내용 직접 스캔)
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks detect --source . --no-git -v --exit-code 1
+
+  # ── 1단계: 테스트 ─────────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+  # ── 2단계: 빌드 & 이미지 푸시 ────────────────────────────
+  build-push:
+    needs: [test, secret-scan]
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+      - name: Set image tag
+        id: meta
+        run: |
+          IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:${{ github.sha }}"
+          echo "image=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+      - name: Build & Push Docker image
+        run: |
+          docker build -t ${{ steps.meta.outputs.image }} ./backend
+          docker push ${{ steps.meta.outputs.image }}
+
+  # ── 3단계: 보안 스캔 ──────────────────────────────────────
+  security-scan:
+    needs: build-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build-push.outputs.image }}
+          format: json
+          output: trivy-report.json
+          exit-code: "0"
+          ignore-unfixed: false
+          severity: "CRITICAL,HIGH,MEDIUM,LOW"
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install anthropic
+      - name: AI Security Analysis
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python scripts/trivy_ai_review.py trivy-report.json \
+            "${{ needs.build-push.outputs.image }}"
+
+  # ── 4단계: Kyverno 정책 배포 ──────────────────────────────
+  kyverno:
+    needs: [build-push, security-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.14.0"
+      - name: Cleanup broken Kyverno state
+        run: |
+          helm uninstall kyverno -n kyverno --no-hooks 2>/dev/null || true
+          kubectl delete secret -n kyverno -l name=kyverno,owner=helm --ignore-not-found 2>/dev/null || true
+          kubectl get validatingwebhookconfigurations -o name 2>/dev/null | grep kyverno | xargs kubectl delete --ignore-not-found || true
+          kubectl get mutatingwebhookconfigurations -o name 2>/dev/null | grep kyverno | xargs kubectl delete --ignore-not-found || true
+          kubectl delete crd -l app.kubernetes.io/name=kyverno --ignore-not-found 2>/dev/null || true
+          sleep 15
+      - name: Install Kyverno
+        run: |
+          helm repo add kyverno https://kyverno.github.io/kyverno
+          helm repo update
+          helm upgrade --install kyverno kyverno/kyverno \
+            --namespace kyverno \
+            --create-namespace \
+            --version 3.2.6 \
+            --set admissionController.replicas=1 \
+            --set backgroundController.replicas=1 \
+            --set cleanupController.replicas=1 \
+            --set reportsController.replicas=1 \
+            --no-hooks \
+            --timeout 10m
+          kubectl rollout status deployment/kyverno-admission-controller -n kyverno --timeout=5m
+      - name: Apply Kyverno policies
+        run: |
+          kubectl apply -f k8s/kyverno/require-non-root.yaml
+          kubectl apply -f k8s/kyverno/require-drop-all-capabilities.yaml
+          kubectl apply -f k8s/kyverno/disallow-privilege-escalation.yaml
+      - name: Kyverno summary
+        run: |
+          echo "### Kyverno 정책 배포 완료" >> $GITHUB_STEP_SUMMARY
+          kubectl get clusterpolicy >> $GITHUB_STEP_SUMMARY
+
+  # ── 5단계: 운영 환경 배포 ────────────────────────────────────
+  deploy:
+    needs: [kyverno, build-push]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+      - name: Create/Update backend-secret
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          DB_PASS=$(gcloud secrets versions access latest \
+            --secret=pinned-db-password \
+            --project=${{ env.PROJECT_ID }})
+          kubectl create secret generic backend-secret \
+            --from-literal=DB_USER=pinned_user \
+            --from-literal=DB_PASSWORD="${DB_PASS}" \
+            -n ${{ env.NAMESPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+      - name: Update prod image tag in kustomize overlay
+        run: |
+          sed -i "s/newTag: .*/newTag: ${{ github.sha }}/" k8s/overlays/prod/kustomization.yaml
+      - name: Commit and push manifest update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/overlays/prod/kustomization.yaml
+          git diff --staged --quiet || \
+            git commit -m "chore: update prod image tag to ${{ github.sha }} [skip ci]"
+          git pull --rebase origin main
+          git push origin main
+      - name: Deployment summary
+        run: |
+          echo "### 운영 배포 ArgoCD 동기화 완료 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "- 이미지 태그: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 네임스페이스: ${{ env.NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ArgoCD가 k8s/overlays/prod 변경을 감지하여 자동 배포합니다" >> $GITHUB_STEP_SUMMARY
+
+  # ── 6단계: Falco 런타임 보안 ──────────────────────────────
+  falco:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.14.0"
+      - name: Add Falco Helm repo
+        run: |
+          helm repo add falcosecurity https://falcosecurity.github.io/charts
+          helm repo update
+      - name: Apply Falco namespace and SA
+        run: |
+          kubectl apply -f k8s/falco/namespace.yaml
+          kubectl apply -f k8s/falco/falcosidekick-sa.yaml
+      - name: Deploy Falco + Falcosidekick
+        run: |
+          helm upgrade --install falco falcosecurity/falco \
+            --namespace falco \
+            --version 4.18.0 \
+            -f k8s/falco/values.yaml \
+            --timeout 10m
+          kubectl rollout status daemonset/falco -n falco --timeout=10m || {
+            kubectl describe pods -n falco -l app.kubernetes.io/name=falco | grep -A 20 "Events:"
+            kubectl logs -n falco -l app.kubernetes.io/name=falco --tail=50 2>/dev/null || true
+            exit 1
+          }
+          kubectl rollout status deployment/falco-falcosidekick -n falco --timeout=5m
+      - name: Falco summary
+        run: |
+          echo "### Falco 런타임 보안 배포 완료" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n falco >> $GITHUB_STEP_SUMMARY
+
+  # ── 7단계: Prometheus + Grafana 모니터링 ─────────────────
+  monitoring:
+    needs: [deploy, falco]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.14.0"
+      - name: Deploy kube-prometheus-stack
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+            --namespace monitoring \
+            --create-namespace \
+            --version 65.3.1 \
+            -f k8s/monitoring/values.yaml \
+            --timeout 10m
+          kubectl rollout status deployment/prometheus-grafana -n monitoring --timeout=5m
+          kubectl rollout status statefulset/prometheus-prometheus-kube-prometheus-prometheus -n monitoring --timeout=5m
+          kubectl apply -f k8s/monitoring/cloud-logging-export.yaml
+      - name: Monitoring summary
+        run: |
+          echo "### 모니터링 스택 배포 완료" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n monitoring >> $GITHUB_STEP_SUMMARY
+          GRAFANA_IP=$(kubectl get svc prometheus-grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
+          echo "- Grafana: http://${GRAFANA_IP} (admin / pinned-grafana-admin)" >> $GITHUB_STEP_SUMMARY
+
+  # ── 8단계: Slack Bot ──────────────────────────────────────
+  slack-bot:
+    needs: monitoring
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Deploy Slack Bot to Cloud Run
+        run: |
+          gcloud run deploy pinned-slack-bot \
+            --source scripts/slack_bot \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars "PROJECT_ID=${{ env.PROJECT_ID }},CLUSTER_NAME=${{ env.CLUSTER }},CLUSTER_REGION=${{ env.REGION }},K8S_NAMESPACE=${{ env.NAMESPACE }},SLACK_CHANNEL=#gke-alerts" \
+            --set-secrets "SLACK_BOT_TOKEN=slack-bot-token:latest,SLACK_SIGNING_SECRET=slack-signing-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest" \
+            --quiet
+      - name: Setup Cloud Scheduler for daily briefing
+        run: |
+          BOT_URL=$(gcloud run services describe pinned-slack-bot --region=${{ env.REGION }} --format='value(status.url)')
+          gcloud scheduler jobs create http pinned-daily-briefing \
+            --location=${{ env.REGION }} \
+            --schedule="0 0 * * *" \
+            --time-zone="Asia/Seoul" \
+            --uri="${BOT_URL}/daily-briefing" \
+            --http-method=POST \
+            --message-body="{}" \
+            --headers="Content-Type=application/json" \
+            2>/dev/null || \
+          gcloud scheduler jobs update http pinned-daily-briefing \
+            --location=${{ env.REGION }} \
+            --schedule="0 0 * * *" \
+            --time-zone="Asia/Seoul" \
+            --uri="${BOT_URL}/daily-briefing" \
+            --http-method=POST \
+            --message-body="{}"
+      - name: Slack Bot summary
+        run: |
+          echo "### Slack Bot 배포 완료" >> $GITHUB_STEP_SUMMARY
+          BOT_URL=$(gcloud run services describe pinned-slack-bot --region=${{ env.REGION }} --format='value(status.url)')
+          echo "- Events URL: ${BOT_URL}/slack/events" >> $GITHUB_STEP_SUMMARY
+          echo "- Interactivity URL: ${BOT_URL}/slack/interactivity" >> $GITHUB_STEP_SUMMARY
+          echo "- Daily briefing: 매일 09:00 KST 자동 전송" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,41 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:15
+    container_name: pinned_db_container
+    restart: always
+    env_file: ./backend/.env
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pinned_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$DB_USER -d $$DB_NAME"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pinned_backend_container
+    restart: always
+    env_file: ./backend/.env
+    environment:
+      DB_HOST: db
+      PORT: 5001
+      NODE_ENV: development
+    ports:
+      - "5001:5001"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pinned_db_data:

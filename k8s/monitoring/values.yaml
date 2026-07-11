@@ -1,0 +1,78 @@
+grafana:
+  enabled: true
+  adminPassword: "pinned-grafana-admin"
+  service:
+    type: LoadBalancer
+  defaultDashboardsEnabled: true
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: grafana-dashboards-kubernetes
+          orgId: 1
+          folder: Kubernetes
+          type: file
+          disableDeletion: true
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/grafana-dashboards-kubernetes
+        - name: falco
+          orgId: 1
+          folder: Security
+          type: file
+          disableDeletion: true
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/falco
+  dashboards:
+    grafana-dashboards-kubernetes:
+      kubernetes-cluster:
+        gnetId: 315
+        revision: 3
+        datasource: Prometheus
+      kubernetes-pods:
+        gnetId: 6417
+        revision: 1
+        datasource: Prometheus
+      kubernetes-resources:
+        gnetId: 12740
+        revision: 2
+        datasource: Prometheus
+    falco:
+      falcosidekick:
+        gnetId: 11001
+        revision: 1
+        datasource: Prometheus
+
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    resources:
+      requests:
+        cpu: 200m
+        memory: 400Mi
+    additionalScrapeConfigs:
+      # Falcosidekick 보안 이벤트 메트릭 수집
+      - job_name: falcosidekick
+        static_configs:
+          - targets:
+              - falco-falcosidekick.falco.svc.cluster.local:2802
+
+alertmanager:
+  enabled: true
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true
+
+# GKE 관리형 컨트롤 플레인은 접근 불가 → 비활성화
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false

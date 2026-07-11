@@ -1,0 +1,3 @@
+ALTER TABLE posts
+  ADD COLUMN IF NOT EXISTS visited_from DATE,
+  ADD COLUMN IF NOT EXISTS visited_to   DATE;

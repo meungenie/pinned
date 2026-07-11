@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloud-logging-config
+  namespace: monitoring
+data:
+  # GKE는 기본적으로 Cloud Logging에 로그를 전송함
+  # 이 ConfigMap은 로그 필터링 기준 문서화 용도
+
+  # Falco 보안 이벤트: resource.type="k8s_container" AND labels.k8s-pod/app="falco"
+  # 백엔드 에러: resource.type="k8s_container" AND severity>=ERROR AND resource.labels.namespace_name="pinned"
+  # Kyverno 차단: resource.type="k8s_container" AND labels.k8s-pod/app="kyverno" AND severity>=WARNING
+
+  log-filter-backend-errors: |
+    resource.type="k8s_container"
+    resource.labels.namespace_name="pinned"
+    severity>=ERROR
+
+  log-filter-falco-alerts: |
+    resource.type="k8s_container"
+    resource.labels.namespace_name="falco"
+    resource.labels.container_name="falco"
+
+  log-filter-kyverno-blocks: |
+    resource.type="k8s_container"
+    resource.labels.namespace_name="kyverno"
+    severity>=WARNING
