@@ -1,0 +1,31 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pinned-ingress
+  namespace: pinned
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.global-static-ip-name: "pinned-ip"
+    networking.gke.io/managed-certificates: "pinned-cert"
+    kubernetes.io/ingress.allow-http: "false"
+spec:
+  rules:
+    - host: api.pinned-app.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 80
+---
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: pinned-cert
+  namespace: pinned
+spec:
+  domains:
+    - api.pinned-app.com
