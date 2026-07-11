@@ -379,11 +379,12 @@ jobs:
 
       - name: Setup Cloud Scheduler for daily briefing
         run: |
+          BOT_URL=$(gcloud run services describe pinned-slack-bot --region=${{ env.REGION }} --format='value(status.url)')
           gcloud scheduler jobs create http pinned-daily-briefing \
             --location=${{ env.REGION }} \
             --schedule="0 0 * * *" \
             --time-zone="Asia/Seoul" \
-            --uri="$(gcloud run services describe pinned-slack-bot --region=${{ env.REGION }} --format='value(status.url)')/daily-briefing" \
+            --uri="${BOT_URL}/daily-briefing" \
             --http-method=POST \
             --message-body="{}" \
             --headers="Content-Type=application/json" \
@@ -392,10 +393,9 @@ jobs:
             --location=${{ env.REGION }} \
             --schedule="0 0 * * *" \
             --time-zone="Asia/Seoul" \
-            --uri="$(gcloud run services describe pinned-slack-bot --region=${{ env.REGION }} --format='value(status.url)')/daily-briefing" \
+            --uri="${BOT_URL}/daily-briefing" \
             --http-method=POST \
-            --message-body="{}" \
-            --headers="Content-Type=application/json"
+            --message-body="{}"
 
       - name: Slack Bot summary
         run: |
