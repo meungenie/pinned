@@ -1,0 +1,164 @@
+name: Infra / Kyverno · Falco · Monitoring
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "k8s/kyverno/**"
+      - "k8s/falco/**"
+      - "k8s/monitoring/**"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  PROJECT_ID: project-9c52df7f-9c59-4739-9b4
+  REGION:     asia-northeast3
+  CLUSTER:    pinned-cluster
+
+jobs:
+  # ── Kyverno: k8s/kyverno/ 변경 시 ─────────────────────────
+  kyverno:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      contains(toJson(github.event.commits.*.modified), 'k8s/kyverno/') ||
+      contains(toJson(github.event.commits.*.added), 'k8s/kyverno/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.14.0"
+      - name: Cleanup broken Kyverno state
+        run: |
+          helm uninstall kyverno -n kyverno --no-hooks 2>/dev/null || true
+          kubectl delete secret -n kyverno -l name=kyverno,owner=helm --ignore-not-found 2>/dev/null || true
+          kubectl get validatingwebhookconfigurations -o name 2>/dev/null | grep kyverno | xargs kubectl delete --ignore-not-found || true
+          kubectl get mutatingwebhookconfigurations -o name 2>/dev/null | grep kyverno | xargs kubectl delete --ignore-not-found || true
+          kubectl delete crd -l app.kubernetes.io/name=kyverno --ignore-not-found 2>/dev/null || true
+          sleep 15
+      - name: Install Kyverno
+        run: |
+          helm repo add kyverno https://kyverno.github.io/kyverno
+          helm repo update
+          helm upgrade --install kyverno kyverno/kyverno \
+            --namespace kyverno \
+            --create-namespace \
+            --version 3.2.6 \
+            --set admissionController.replicas=1 \
+            --set backgroundController.replicas=1 \
+            --set cleanupController.replicas=1 \
+            --set reportsController.replicas=1 \
+            --no-hooks \
+            --timeout 10m
+          kubectl rollout status deployment/kyverno-admission-controller -n kyverno --timeout=5m
+      - name: Apply Kyverno policies
+        run: |
+          kubectl apply -f k8s/kyverno/require-non-root.yaml
+          kubectl apply -f k8s/kyverno/require-drop-all-capabilities.yaml
+          kubectl apply -f k8s/kyverno/disallow-privilege-escalation.yaml
+      - name: Summary
+        run: |
+          echo "### Kyverno 정책 배포 완료" >> $GITHUB_STEP_SUMMARY
+          kubectl get clusterpolicy >> $GITHUB_STEP_SUMMARY
+
+  # ── Falco: k8s/falco/ 변경 시 ─────────────────────────────
+  falco:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      contains(toJson(github.event.commits.*.modified), 'k8s/falco/') ||
+      contains(toJson(github.event.commits.*.added), 'k8s/falco/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.14.0"
+      - name: Deploy Falco + Falcosidekick
+        run: |
+          helm repo add falcosecurity https://falcosecurity.github.io/charts
+          helm repo update
+          kubectl apply -f k8s/falco/namespace.yaml
+          kubectl apply -f k8s/falco/falcosidekick-sa.yaml
+          helm upgrade --install falco falcosecurity/falco \
+            --namespace falco \
+            --version 4.18.0 \
+            -f k8s/falco/values.yaml \
+            --timeout 10m
+          kubectl rollout status daemonset/falco -n falco --timeout=10m || {
+            kubectl describe pods -n falco -l app.kubernetes.io/name=falco | grep -A 20 "Events:"
+            kubectl logs -n falco -l app.kubernetes.io/name=falco --tail=50 2>/dev/null || true
+            exit 1
+          }
+          kubectl rollout status deployment/falco-falcosidekick -n falco --timeout=5m
+      - name: Summary
+        run: |
+          echo "### Falco 런타임 보안 배포 완료" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n falco >> $GITHUB_STEP_SUMMARY
+
+  # ── Monitoring: k8s/monitoring/ 변경 시 ───────────────────
+  monitoring:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      contains(toJson(github.event.commits.*.modified), 'k8s/monitoring/') ||
+      contains(toJson(github.event.commits.*.added), 'k8s/monitoring/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.14.0"
+      - name: Deploy kube-prometheus-stack
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+            --namespace monitoring \
+            --create-namespace \
+            --version 65.3.1 \
+            -f k8s/monitoring/values.yaml \
+            --timeout 10m
+          kubectl rollout status deployment/prometheus-grafana -n monitoring --timeout=5m
+          kubectl rollout status statefulset/prometheus-prometheus-kube-prometheus-prometheus -n monitoring --timeout=5m
+          kubectl apply -f k8s/monitoring/cloud-logging-export.yaml
+      - name: Summary
+        run: |
+          echo "### 모니터링 스택 배포 완료" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n monitoring >> $GITHUB_STEP_SUMMARY
+          GRAFANA_IP=$(kubectl get svc prometheus-grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
+          echo "- Grafana: http://${GRAFANA_IP} (admin / pinned-grafana-admin)" >> $GITHUB_STEP_SUMMARY
