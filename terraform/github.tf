@@ -68,8 +68,11 @@ resource "google_project_iam_member" "github_actions_editor" {
 }
 
 # Secret Manager 읽기 권한 (backend-secret 생성 시 DB 비밀번호 조회)
-# 최소 권한 원칙 적용: 프로젝트 전체가 아닌 실제로 필요한 개별 시크릿(pinned-db-password)에만 바인딩.
+# 최소 권한 원칙(PoLP) 적용: 프로젝트 전체(google_project_iam_member)가 아닌
+# 실제로 필요한 개별 시크릿(pinned-db-password)에만 secretAccessor 바인딩.
 # 인증은 Workload Identity Federation(OIDC) + 리포지토리 조건 제한을 사용하므로 정적 JSON 키 미사용.
+# NOTE: CI/CD가 db_password 외 다른 시크릿(예: anthropic-api-key)에도 접근한다면
+#       해당 시크릿에 대한 google_secret_manager_secret_iam_member를 추가로 정의해야 함.
 resource "google_secret_manager_secret_iam_member" "github_actions_db_password" {
   secret_id = google_secret_manager_secret.db_password.id
   role      = "roles/secretmanager.secretAccessor"
