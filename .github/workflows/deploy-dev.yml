@@ -107,9 +107,37 @@ jobs:
           python scripts/trivy_ai_review.py trivy-report.json \
             "${{ needs.build-push.outputs.image }}"
 
-  # ── 4단계: Kustomize overlay 이미지 태그 업데이트 → ArgoCD 자동 배포 ──
+  # ── 4단계: K8s Secret 생성 (GCP Secret Manager → pinned-dev) ─────
+  create-dev-secret:
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+      - name: Create backend-secret in pinned-dev
+        run: |
+          kubectl apply -f k8s/namespace-dev.yaml
+          DB_PASS=$(gcloud secrets versions access latest \
+            --secret=pinned-db-password \
+            --project=${{ env.PROJECT_ID }})
+          kubectl create secret generic backend-secret \
+            --from-literal=DB_USER=pinned_user \
+            --from-literal=DB_PASSWORD="${DB_PASS}" \
+            -n ${{ env.NAMESPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+  # ── 5단계: Kustomize overlay 이미지 태그 업데이트 → ArgoCD 자동 배포 ──
   update-manifest:
-    needs: [security-scan, build-push]
+    needs: [security-scan, create-dev-secret, build-push]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
