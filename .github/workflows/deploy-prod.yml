@@ -1,122 +1,105 @@
-name: Build & Deploy to GKE
+name: CI / Deploy to Production
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
 
 permissions:
   contents: read
-  id-token: write   # WIF 토큰 발급에 필요
+  id-token: write
 
 env:
-  PROJECT_ID: project-9c52df7f-9c59-4739-9b4
-  REGION: asia-northeast3          # 서울
-  CLUSTER: pinned-cluster
+  PROJECT_ID:    project-9c52df7f-9c59-4739-9b4
+  REGION:        asia-northeast3
+  CLUSTER:       pinned-cluster
   ARTIFACT_REPO: pinned-app
-  IMAGE: backend
+  IMAGE:         backend
+  NAMESPACE:     pinned
 
 jobs:
-  # ── 0단계: 시크릿 스캔 ─────────────────────────────────
+  # ── 0단계: 시크릿 스캔 ────────────────────────────────────
   secret-scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # 전체 git 히스토리 스캔
-
+          fetch-depth: 0
       - name: Gitleaks secret scan
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── 1단계: 테스트 ──────────────────────────────────────
+  # ── 1단계: 테스트 ─────────────────────────────────────────
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: backend/package-lock.json
-
       - name: Install dependencies
         working-directory: backend
         run: npm ci
 
-  # ── 2단계: 빌드 & 이미지 푸시 ──────────────────────────
+  # ── 2단계: 빌드 & 이미지 푸시 ────────────────────────────
   build-push:
     needs: [test, secret-scan]
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.meta.outputs.image }}
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Google Auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
-
       - name: Set image tag
         id: meta
         run: |
           IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:${{ github.sha }}"
           echo "image=${IMAGE_TAG}" >> $GITHUB_OUTPUT
-
       - name: Build & Push Docker image
         run: |
           docker build -t ${{ steps.meta.outputs.image }} ./backend
           docker push ${{ steps.meta.outputs.image }}
 
-  # ── 3단계: 보안 스캔 ────────────────────────────────────
+  # ── 3단계: 보안 스캔 ──────────────────────────────────────
   security-scan:
     needs: build-push
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Google Auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
-
-      # Trivy: 이미지 내 OS 패키지 + npm 패키지 취약점 스캔 (JSON 출력)
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ needs.build-push.outputs.image }}
           format: json
           output: trivy-report.json
-          exit-code: "0"       # 여기서 실패시키지 않고 AI가 차단 여부 판단
+          exit-code: "0"
           ignore-unfixed: false
           severity: "CRITICAL,HIGH,MEDIUM,LOW"
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Install dependencies
         run: pip install anthropic
-
-      # Claude가 스캔 결과를 분석해 GitHub Summary에 리포트 게시
-      # CRITICAL 발견 시 exit(1) → 다음 단계(deploy) 차단
       - name: AI Security Analysis
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -124,42 +107,34 @@ jobs:
           python scripts/trivy_ai_review.py trivy-report.json \
             "${{ needs.build-push.outputs.image }}"
 
-  # ── 4단계: Kyverno 정책 배포 (deploy 전에 먼저 실행) ──────────────────────────
-  # Kyverno webhook이 없는 상태에서 deploy가 실행돼야 정책 검증 오류 없음
+  # ── 4단계: Kyverno 정책 배포 ──────────────────────────────
   kyverno:
     needs: [build-push, security-scan]
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Google Auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-
       - name: Get GKE credentials
         uses: google-github-actions/get-gke-credentials@v2
         with:
           cluster_name: ${{ env.CLUSTER }}
           location: ${{ env.REGION }}
-
       - name: Install Helm
         uses: azure/setup-helm@v4
         with:
           version: "3.14.0"
-
       - name: Cleanup broken Kyverno state
         run: |
           helm uninstall kyverno -n kyverno --no-hooks 2>/dev/null || true
-          # helm uninstall이 실패해도 Helm 릴리즈 시크릿을 직접 삭제해서 stuck 상태 해소
           kubectl delete secret -n kyverno -l name=kyverno,owner=helm --ignore-not-found 2>/dev/null || true
           kubectl get validatingwebhookconfigurations -o name 2>/dev/null | grep kyverno | xargs kubectl delete --ignore-not-found || true
           kubectl get mutatingwebhookconfigurations -o name 2>/dev/null | grep kyverno | xargs kubectl delete --ignore-not-found || true
           kubectl delete crd -l app.kubernetes.io/name=kyverno --ignore-not-found 2>/dev/null || true
           sleep 15
-
       - name: Install Kyverno
         run: |
           helm repo add kyverno https://kyverno.github.io/kyverno
@@ -175,38 +150,33 @@ jobs:
             --no-hooks \
             --timeout 10m
           kubectl rollout status deployment/kyverno-admission-controller -n kyverno --timeout=5m
-
       - name: Apply Kyverno policies
         run: |
           kubectl apply -f k8s/kyverno/require-non-root.yaml
           kubectl apply -f k8s/kyverno/require-drop-all-capabilities.yaml
           kubectl apply -f k8s/kyverno/disallow-privilege-escalation.yaml
-
       - name: Kyverno summary
         run: |
           echo "### Kyverno 정책 배포 완료" >> $GITHUB_STEP_SUMMARY
           kubectl get clusterpolicy >> $GITHUB_STEP_SUMMARY
 
-  # ── 5단계: GKE 배포 ────────────────────────────────────
+  # ── 5단계: 운영 환경 배포 (수동 승인 필요) ───────────────
   deploy:
     needs: [kyverno, build-push]
     runs-on: ubuntu-latest
-
+    environment: production        # GitHub Environment 승인 게이트
     steps:
       - uses: actions/checkout@v4
-
       - name: Google Auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-
       - name: Get GKE credentials
         uses: google-github-actions/get-gke-credentials@v2
         with:
           cluster_name: ${{ env.CLUSTER }}
           location: ${{ env.REGION }}
-
       - name: Apply Kubernetes manifests
         run: |
           kubectl apply -f k8s/namespace.yaml
@@ -216,8 +186,7 @@ jobs:
           kubectl apply -f k8s/backend/service.yaml
           kubectl apply -f k8s/backend/hpa.yaml
           kubectl apply -f k8s/ingress.yaml
-
-      - name: Create backend-secret from Secret Manager
+      - name: Create backend-secret
         run: |
           DB_PASS=$(gcloud secrets versions access latest \
             --secret=pinned-db-password \
@@ -225,65 +194,52 @@ jobs:
           kubectl create secret generic backend-secret \
             --from-literal=DB_USER=pinned_user \
             --from-literal=DB_PASSWORD="${DB_PASS}" \
-            -n pinned \
+            -n ${{ env.NAMESPACE }} \
             --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Apply backend deployment
+      - name: Deploy backend
         run: |
           sed "s|REGION-docker.pkg.dev/PROJECT_ID/pinned/backend:latest|${{ needs.build-push.outputs.image }}|g" \
             k8s/backend/deployment.yaml | kubectl apply -f -
-
-      - name: Wait for rollout
-        run: |
-          kubectl rollout status deployment/backend -n pinned --timeout=5m
-
+          kubectl rollout status deployment/backend -n ${{ env.NAMESPACE }} --timeout=5m
       - name: Apply Network Policy
         run: |
           kubectl apply -f k8s/network-policy/default-deny.yaml
           kubectl apply -f k8s/network-policy/backend-allow.yaml
-
       - name: Deployment summary
         run: |
-          echo "### 배포 완료 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "### 운영 환경 배포 완료 🚀" >> $GITHUB_STEP_SUMMARY
           echo "- 이미지: ${{ needs.build-push.outputs.image }}" >> $GITHUB_STEP_SUMMARY
-          echo "- 클러스터: ${{ env.CLUSTER }}" >> $GITHUB_STEP_SUMMARY
-          kubectl get pods -n pinned >> $GITHUB_STEP_SUMMARY
+          echo "- 네임스페이스: ${{ env.NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n ${{ env.NAMESPACE }} >> $GITHUB_STEP_SUMMARY
 
-  # ── 6단계: Falco 런타임 보안 배포 ──────────────────────────
+  # ── 6단계: Falco 런타임 보안 ──────────────────────────────
   falco:
     needs: deploy
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Google Auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-
       - name: Get GKE credentials
         uses: google-github-actions/get-gke-credentials@v2
         with:
           cluster_name: ${{ env.CLUSTER }}
           location: ${{ env.REGION }}
-
       - name: Install Helm
         uses: azure/setup-helm@v4
         with:
           version: "3.14.0"
-
       - name: Add Falco Helm repo
         run: |
           helm repo add falcosecurity https://falcosecurity.github.io/charts
           helm repo update
-
-      - name: Apply Falco namespace and Workload Identity SA
+      - name: Apply Falco namespace and SA
         run: |
           kubectl apply -f k8s/falco/namespace.yaml
           kubectl apply -f k8s/falco/falcosidekick-sa.yaml
-
       - name: Deploy Falco + Falcosidekick
         run: |
           helm upgrade --install falco falcosecurity/falco \
@@ -292,45 +248,36 @@ jobs:
             -f k8s/falco/values.yaml \
             --timeout 10m
           kubectl rollout status daemonset/falco -n falco --timeout=10m || {
-            echo "=== Falco pod events ==="
             kubectl describe pods -n falco -l app.kubernetes.io/name=falco | grep -A 20 "Events:"
-            echo "=== Falco pod logs ==="
-            kubectl logs -n falco -l app.kubernetes.io/name=falco --tail=50 2>/dev/null || \
-            kubectl logs -n falco -l app.kubernetes.io/name=falco --previous --tail=50 2>/dev/null || true
+            kubectl logs -n falco -l app.kubernetes.io/name=falco --tail=50 2>/dev/null || true
             exit 1
           }
           kubectl rollout status deployment/falco-falcosidekick -n falco --timeout=5m
-
       - name: Falco summary
         run: |
           echo "### Falco 런타임 보안 배포 완료" >> $GITHUB_STEP_SUMMARY
           kubectl get pods -n falco >> $GITHUB_STEP_SUMMARY
 
-  # ── 7단계: Prometheus + Grafana 모니터링 ────────────────────────
+  # ── 7단계: Prometheus + Grafana 모니터링 ─────────────────
   monitoring:
     needs: [deploy, falco]
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Google Auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-
       - name: Get GKE credentials
         uses: google-github-actions/get-gke-credentials@v2
         with:
           cluster_name: ${{ env.CLUSTER }}
           location: ${{ env.REGION }}
-
       - name: Install Helm
         uses: azure/setup-helm@v4
         with:
           version: "3.14.0"
-
       - name: Deploy kube-prometheus-stack
         run: |
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
@@ -344,7 +291,6 @@ jobs:
           kubectl rollout status deployment/prometheus-grafana -n monitoring --timeout=5m
           kubectl rollout status statefulset/prometheus-prometheus-kube-prometheus-prometheus -n monitoring --timeout=5m
           kubectl apply -f k8s/monitoring/cloud-logging-export.yaml
-
       - name: Monitoring summary
         run: |
           echo "### 모니터링 스택 배포 완료" >> $GITHUB_STEP_SUMMARY
@@ -352,20 +298,17 @@ jobs:
           GRAFANA_IP=$(kubectl get svc prometheus-grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
           echo "- Grafana: http://${GRAFANA_IP} (admin / pinned-grafana-admin)" >> $GITHUB_STEP_SUMMARY
 
-  # ── 8단계: Slack Bot Cloud Run 배포 ────────────────────────────
+  # ── 8단계: Slack Bot ──────────────────────────────────────
   slack-bot:
     needs: monitoring
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Google Auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-
       - name: Deploy Slack Bot to Cloud Run
         run: |
           gcloud run deploy pinned-slack-bot \
@@ -373,10 +316,9 @@ jobs:
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars "PROJECT_ID=${{ env.PROJECT_ID }},CLUSTER_NAME=${{ env.CLUSTER }},CLUSTER_REGION=${{ env.REGION }},K8S_NAMESPACE=pinned,SLACK_CHANNEL=#gke-alerts" \
+            --set-env-vars "PROJECT_ID=${{ env.PROJECT_ID }},CLUSTER_NAME=${{ env.CLUSTER }},CLUSTER_REGION=${{ env.REGION }},K8S_NAMESPACE=${{ env.NAMESPACE }},SLACK_CHANNEL=#gke-alerts" \
             --set-secrets "SLACK_BOT_TOKEN=slack-bot-token:latest,SLACK_SIGNING_SECRET=slack-signing-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest" \
             --quiet
-
       - name: Setup Cloud Scheduler for daily briefing
         run: |
           BOT_URL=$(gcloud run services describe pinned-slack-bot --region=${{ env.REGION }} --format='value(status.url)')
@@ -396,7 +338,6 @@ jobs:
             --uri="${BOT_URL}/daily-briefing" \
             --http-method=POST \
             --message-body="{}"
-
       - name: Slack Bot summary
         run: |
           echo "### Slack Bot 배포 완료" >> $GITHUB_STEP_SUMMARY
