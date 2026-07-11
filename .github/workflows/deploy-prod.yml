@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 env:
@@ -160,13 +160,15 @@ jobs:
           echo "### Kyverno 정책 배포 완료" >> $GITHUB_STEP_SUMMARY
           kubectl get clusterpolicy >> $GITHUB_STEP_SUMMARY
 
-  # ── 5단계: 운영 환경 배포 (수동 승인 필요) ───────────────
+  # ── 5단계: 운영 환경 배포 (수동 승인 후 ArgoCD 동기화) ─────
   deploy:
     needs: [kyverno, build-push]
     runs-on: ubuntu-latest
     environment: production        # GitHub Environment 승인 게이트
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Google Auth
         uses: google-github-actions/auth@v2
         with:
@@ -177,17 +179,9 @@ jobs:
         with:
           cluster_name: ${{ env.CLUSTER }}
           location: ${{ env.REGION }}
-      - name: Apply Kubernetes manifests
+      - name: Create/Update backend-secret
         run: |
           kubectl apply -f k8s/namespace.yaml
-          kubectl apply -f k8s/backend/serviceaccount.yaml
-          kubectl apply -f k8s/backend/backendconfig.yaml
-          kubectl apply -f k8s/backend/configmap.yaml
-          kubectl apply -f k8s/backend/service.yaml
-          kubectl apply -f k8s/backend/hpa.yaml
-          kubectl apply -f k8s/ingress.yaml
-      - name: Create backend-secret
-        run: |
           DB_PASS=$(gcloud secrets versions access latest \
             --secret=pinned-db-password \
             --project=${{ env.PROJECT_ID }})
@@ -196,21 +190,24 @@ jobs:
             --from-literal=DB_PASSWORD="${DB_PASS}" \
             -n ${{ env.NAMESPACE }} \
             --dry-run=client -o yaml | kubectl apply -f -
-      - name: Deploy backend
+      - name: Update prod image tag in kustomize overlay
         run: |
-          sed "s|REGION-docker.pkg.dev/PROJECT_ID/pinned/backend:latest|${{ needs.build-push.outputs.image }}|g" \
-            k8s/backend/deployment.yaml | kubectl apply -f -
-          kubectl rollout status deployment/backend -n ${{ env.NAMESPACE }} --timeout=5m
-      - name: Apply Network Policy
+          sed -i "s/newTag: .*/newTag: ${{ github.sha }}/" k8s/overlays/prod/kustomization.yaml
+      - name: Commit and push manifest update
         run: |
-          kubectl apply -f k8s/network-policy/default-deny.yaml
-          kubectl apply -f k8s/network-policy/backend-allow.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/overlays/prod/kustomization.yaml
+          git diff --staged --quiet || \
+            git commit -m "chore: update prod image tag to ${{ github.sha }} [skip ci]"
+          git pull --rebase origin main
+          git push origin main
       - name: Deployment summary
         run: |
-          echo "### 운영 환경 배포 완료 🚀" >> $GITHUB_STEP_SUMMARY
-          echo "- 이미지: ${{ needs.build-push.outputs.image }}" >> $GITHUB_STEP_SUMMARY
+          echo "### 운영 배포 ArgoCD 동기화 완료 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "- 이미지 태그: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- 네임스페이스: ${{ env.NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
-          kubectl get pods -n ${{ env.NAMESPACE }} >> $GITHUB_STEP_SUMMARY
+          echo "- ArgoCD가 k8s/overlays/prod 변경을 감지하여 자동 배포합니다" >> $GITHUB_STEP_SUMMARY
 
   # ── 6단계: Falco 런타임 보안 ──────────────────────────────
   falco:

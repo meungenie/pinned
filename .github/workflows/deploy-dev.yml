@@ -5,7 +5,7 @@ on:
     branches: [dev]
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 env:
@@ -107,63 +107,32 @@ jobs:
           python scripts/trivy_ai_review.py trivy-report.json \
             "${{ needs.build-push.outputs.image }}"
 
-  # ── 4단계: 개발 환경 배포 (pinned-dev 네임스페이스) ──────
-  deploy:
+  # ── 4단계: Kustomize overlay 이미지 태그 업데이트 → ArgoCD 자동 배포 ──
+  update-manifest:
     needs: [security-scan, build-push]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Google Auth
-        uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-      - name: Get GKE credentials
-        uses: google-github-actions/get-gke-credentials@v2
-        with:
-          cluster_name: ${{ env.CLUSTER }}
-          location: ${{ env.REGION }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Apply dev namespace
-        run: kubectl apply -f k8s/namespace-dev.yaml
-
-      - name: Apply Kubernetes manifests
+      - name: Update dev image tag in kustomize overlay
         run: |
-          kubectl apply -f k8s/backend/serviceaccount.yaml -n ${{ env.NAMESPACE }}
-          kubectl apply -f k8s/backend/backendconfig.yaml  -n ${{ env.NAMESPACE }}
-          kubectl apply -f k8s/backend/configmap.yaml      -n ${{ env.NAMESPACE }}
-          kubectl apply -f k8s/backend/service.yaml        -n ${{ env.NAMESPACE }}
-          kubectl apply -f k8s/backend/hpa.yaml            -n ${{ env.NAMESPACE }}
+          sed -i "s/newTag: .*/newTag: dev-${{ github.sha }}/" k8s/overlays/dev/kustomization.yaml
 
-      - name: Create backend-secret
+      - name: Commit and push manifest update
         run: |
-          DB_PASS=$(gcloud secrets versions access latest \
-            --secret=pinned-db-password \
-            --project=${{ env.PROJECT_ID }})
-          kubectl create secret generic backend-secret \
-            --from-literal=DB_USER=pinned_user \
-            --from-literal=DB_PASSWORD="${DB_PASS}" \
-            -n ${{ env.NAMESPACE }} \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Deploy backend
-        run: |
-          sed "s|REGION-docker.pkg.dev/PROJECT_ID/pinned/backend:latest|${{ needs.build-push.outputs.image }}|g" \
-            k8s/backend/deployment.yaml | \
-            sed "s|namespace: pinned|namespace: ${{ env.NAMESPACE }}|g" | \
-            kubectl apply -f -
-          kubectl rollout status deployment/backend -n ${{ env.NAMESPACE }} --timeout=5m
-
-      - name: Apply Network Policy
-        run: |
-          sed "s|namespace: pinned|namespace: ${{ env.NAMESPACE }}|g" \
-            k8s/network-policy/default-deny.yaml | kubectl apply -f -
-          sed "s|namespace: pinned|namespace: ${{ env.NAMESPACE }}|g" \
-            k8s/network-policy/backend-allow.yaml | kubectl apply -f -
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/overlays/dev/kustomization.yaml
+          git diff --staged --quiet || \
+            git commit -m "chore: update dev image tag to dev-${{ github.sha }} [skip ci]"
+          git pull --rebase origin dev
+          git push origin dev
 
       - name: Deployment summary
         run: |
-          echo "### 개발 환경 배포 완료 🚀" >> $GITHUB_STEP_SUMMARY
-          echo "- 이미지: ${{ needs.build-push.outputs.image }}" >> $GITHUB_STEP_SUMMARY
+          echo "### ArgoCD 자동 배포 트리거 완료 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "- 이미지 태그: dev-${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- 네임스페이스: ${{ env.NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
-          kubectl get pods -n ${{ env.NAMESPACE }} >> $GITHUB_STEP_SUMMARY
+          echo "- ArgoCD가 k8s/overlays/dev 변경을 감지하여 자동 배포합니다" >> $GITHUB_STEP_SUMMARY
