@@ -2,11 +2,11 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - ../../
+  - ../../base
 
 namespace: pinned-dev
 
 images:
   - name: REGION-docker.pkg.dev/PROJECT_ID/pinned/backend
     newName: asia-northeast3-docker.pkg.dev/project-9c52df7f-9c59-4739-9b4/pinned-app/backend
-    newTag: dev-618bcb28b8860b4022ae1d30cd7950668a4af152
+    newTag: dev-2452588f49f97fe8d97ab63b3dbb0485ebf85147

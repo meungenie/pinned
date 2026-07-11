@@ -1,0 +1,22 @@
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: pinned-backend-config
+  namespace: pinned
+spec:
+  # Cloud Armor WAF 정책 연결
+  # Terraform의 google_compute_security_policy.waf.name 과 일치해야 함
+  securityPolicy:
+    name: pinned-waf-policy
+
+  # 백엔드 응답 타임아웃 (기본 30초)
+  timeoutSec: 30
+
+  # 배포 중 진행 중인 요청을 graceful하게 처리
+  connectionDraining:
+    drainingTimeoutSec: 60
+
+  # Cloud Logging — WAF 차단 로그 Cloud Logging으로 전송
+  logging:
+    enable: true
+    sampleRate: 1.0

@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-allow
+  namespace: pinned
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Google Cloud Load Balancer → backend:5001
+    # GKE native ingress는 LB가 직접 Pod에 도달하므로 ipBlock으로 허용
+    - ports:
+        - port: 5001
+          protocol: TCP
+
+  egress:
+    # kube-dns (DNS 조회)
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+
+    # Cloud SQL Auth Proxy → Cloud SQL API, Secret Manager, GCP APIs
+    # Cloud SQL Proxy는 443(TLS)으로 GCP에 연결
+    - ports:
+        - port: 443
+          protocol: TCP
+
+    # Cloud SQL Auth Proxy → PostgreSQL (private IP)
+    - ports:
+        - port: 5432
+          protocol: TCP
