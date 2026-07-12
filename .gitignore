@@ -35,7 +35,7 @@ yarn-error.log*
 *.sln
 *.sw?
 # Kubernetes secrets (절대 git에 올리지 않음)
-k8s/backend/secret.yaml
+k8s/**/secret.yaml
 
 # Terraform
 .terraform/
