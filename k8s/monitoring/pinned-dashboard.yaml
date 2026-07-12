@@ -1,0 +1,191 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pinned-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  pinned-dashboard.json: |
+    {
+      "title": "Pinned · 서비스 현황",
+      "uid": "pinned-overview",
+      "timezone": "Asia/Seoul",
+      "refresh": "30s",
+      "time": { "from": "now-1h", "to": "now" },
+      "templating": {
+        "list": [
+          {
+            "name": "namespace",
+            "type": "custom",
+            "label": "네임스페이스",
+            "current": { "value": "pinned-dev", "text": "pinned-dev" },
+            "options": [
+              { "value": "pinned-dev", "text": "pinned-dev" },
+              { "value": "pinned",     "text": "pinned (prod)" }
+            ],
+            "query": "pinned-dev,pinned"
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1, "type": "stat", "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+          "title": "실행 중 Pod",
+          "options": { "colorMode": "background", "textMode": "auto" },
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": { "steps": [{"color":"red","value":0},{"color":"green","value":1}] },
+              "unit": "short", "color": { "mode": "thresholds" }
+            }
+          },
+          "targets": [{
+            "expr": "count(kube_pod_status_phase{namespace=\"$namespace\", phase=\"Running\"})",
+            "legendFormat": "Running Pods"
+          }]
+        },
+        {
+          "id": 2, "type": "stat", "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+          "title": "Pod 재시작 (1h)",
+          "options": { "colorMode": "background", "textMode": "auto" },
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": { "steps": [{"color":"green","value":0},{"color":"yellow","value":1},{"color":"red","value":5}] },
+              "unit": "short", "color": { "mode": "thresholds" }
+            }
+          },
+          "targets": [{
+            "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\"}[1h]))",
+            "legendFormat": "Restarts"
+          }]
+        },
+        {
+          "id": 3, "type": "gauge", "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+          "title": "CPU 사용률",
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent", "min": 0, "max": 100,
+              "thresholds": { "steps": [{"color":"green","value":0},{"color":"yellow","value":70},{"color":"red","value":90}] },
+              "color": { "mode": "thresholds" }
+            }
+          },
+          "targets": [{
+            "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", container!=\"\", container!=\"POD\"}[5m])) / sum(kube_pod_container_resource_limits{namespace=\"$namespace\", resource=\"cpu\", container!=\"\"}) * 100",
+            "legendFormat": "CPU%"
+          }]
+        },
+        {
+          "id": 4, "type": "gauge", "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+          "title": "메모리 사용률",
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent", "min": 0, "max": 100,
+              "thresholds": { "steps": [{"color":"green","value":0},{"color":"yellow","value":75},{"color":"red","value":90}] },
+              "color": { "mode": "thresholds" }
+            }
+          },
+          "targets": [{
+            "expr": "sum(container_memory_working_set_bytes{namespace=\"$namespace\", container!=\"\", container!=\"POD\"}) / sum(kube_pod_container_resource_limits{namespace=\"$namespace\", resource=\"memory\", container!=\"\"}) * 100",
+            "legendFormat": "Memory%"
+          }]
+        },
+        {
+          "id": 5, "type": "stat", "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+          "title": "HTTP 요청 수 (1m)",
+          "options": { "colorMode": "background", "textMode": "auto" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps", "color": { "mode": "fixed", "fixedColor": "blue" },
+              "thresholds": { "steps": [{"color":"blue","value":0}] }
+            }
+          },
+          "targets": [{
+            "expr": "sum(rate(container_network_receive_bytes_total{namespace=\"$namespace\"}[1m]))",
+            "legendFormat": "수신 bytes/s"
+          }]
+        },
+        {
+          "id": 6, "type": "timeseries", "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+          "title": "Pod별 CPU 사용률",
+          "fieldConfig": {
+            "defaults": { "unit": "cores", "custom": { "lineWidth": 2 } }
+          },
+          "targets": [{
+            "expr": "sum by(pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", container!=\"\", container!=\"POD\"}[5m]))",
+            "legendFormat": "{{pod}}"
+          }]
+        },
+        {
+          "id": 7, "type": "timeseries", "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+          "title": "Pod별 메모리 사용량",
+          "fieldConfig": {
+            "defaults": { "unit": "bytes", "custom": { "lineWidth": 2 } }
+          },
+          "targets": [{
+            "expr": "sum by(pod) (container_memory_working_set_bytes{namespace=\"$namespace\", container!=\"\", container!=\"POD\"})",
+            "legendFormat": "{{pod}}"
+          }]
+        },
+        {
+          "id": 8, "type": "timeseries", "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+          "title": "네트워크 수신 트래픽",
+          "fieldConfig": {
+            "defaults": { "unit": "Bps", "custom": { "lineWidth": 2 } }
+          },
+          "targets": [{
+            "expr": "sum by(pod) (rate(container_network_receive_bytes_total{namespace=\"$namespace\"}[5m]))",
+            "legendFormat": "{{pod}}"
+          }]
+        },
+        {
+          "id": 9, "type": "timeseries", "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+          "title": "네트워크 송신 트래픽",
+          "fieldConfig": {
+            "defaults": { "unit": "Bps", "custom": { "lineWidth": 2 } }
+          },
+          "targets": [{
+            "expr": "sum by(pod) (rate(container_network_transmit_bytes_total{namespace=\"$namespace\"}[5m]))",
+            "legendFormat": "{{pod}}"
+          }]
+        },
+        {
+          "id": 10, "type": "timeseries", "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+          "title": "노드별 CPU 사용률",
+          "fieldConfig": {
+            "defaults": { "unit": "percent", "custom": { "lineWidth": 2 },
+              "thresholds": { "steps": [{"color":"green","value":0},{"color":"red","value":80}] }
+            }
+          },
+          "targets": [{
+            "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+            "legendFormat": "{{instance}}"
+          }]
+        },
+        {
+          "id": 11, "type": "timeseries", "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+          "title": "노드별 메모리 사용률",
+          "fieldConfig": {
+            "defaults": { "unit": "percent", "custom": { "lineWidth": 2 },
+              "thresholds": { "steps": [{"color":"green","value":0},{"color":"red","value":85}] }
+            }
+          },
+          "targets": [{
+            "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
+            "legendFormat": "{{instance}}"
+          }]
+        },
+        {
+          "id": 12, "type": "timeseries", "gridPos": { "x": 0, "y": 28, "w": 24, "h": 6 },
+          "title": "Pod 재시작 이력",
+          "fieldConfig": {
+            "defaults": { "unit": "short", "custom": { "lineWidth": 2, "drawStyle": "bars" } }
+          },
+          "targets": [{
+            "expr": "sum by(pod, container) (increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\"}[5m]))",
+            "legendFormat": "{{pod}} / {{container}}"
+          }]
+        }
+      ]
+    }
