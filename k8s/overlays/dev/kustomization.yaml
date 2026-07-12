@@ -9,4 +9,4 @@ namespace: pinned-dev
 images:
   - name: REGION-docker.pkg.dev/PROJECT_ID/pinned/backend
     newName: asia-northeast3-docker.pkg.dev/project-9c52df7f-9c59-4739-9b4/pinned-app/backend
-    newTag: dev-1c7f454640a0e342aaba48bb64ea5979df3aa824
+    newTag: dev-009eabd751c4ab08ae9c10ad60d0c879cb57f1ce
