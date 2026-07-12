@@ -80,7 +80,6 @@ exports.addPhoto = async (req, res) => {
 
     await gcsFile.save(req.file.buffer, {
       metadata: { contentType: req.file.mimetype },
-      public: true,
     });
 
     const url = `https://storage.googleapis.com/${process.env.GCS_BUCKET_NAME}/${filename}`;

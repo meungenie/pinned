@@ -9,3 +9,5 @@ data:
   DB_HOST: "127.0.0.1"   # Cloud SQL Auth Proxy sidecar
   DB_PORT: "5432"
   DB_NAME: "pinned"
+  GCS_BUCKET_NAME: "pinned-photos"
+  GCS_PROJECT_ID: "project-9c52df7f-9c59-4739-9b4"
