@@ -1,13 +1,135 @@
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css");
+
+:root {
+  --bg: #fcfcfa;
+  --ink: #101012;
+  --gray: #8a8a85;
+  --gray-light: #b9b7b1;
+  --hairline: #ecece8;
+  --surface: #ffffff;
+  --pin: #ff3b1c;
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+  background: var(--bg);
+  color: var(--ink);
+  font-family:
+    "Pretendard Variable",
+    Pretendard,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
     sans-serif;
+  letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+::selection {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--gray-light);
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--ink) !important;
+}
+
+/* ── 지도 핀 마커 (MapView.js에서 사용) ─────────────
+   구조: [pin-head(원형 프로필 + 스택)] → [pin-tail] → [pin-label] */
+
+.pin-marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  transition: transform 0.18s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+.pin-marker:hover {
+  transform: translateY(-3px) scale(1.05);
+}
+
+.pin-head {
+  position: relative;
+  z-index: 2;
+}
+
+.pin-face {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  border: 2.5px solid var(--pin);
+  box-shadow: 0 3px 12px rgba(16, 16, 18, 0.28);
+  overflow: hidden;
+}
+
+/* 프로필 사진 기능 추가 시: .pin-face 안에 <img class="pin-face-img"> */
+.pin-face-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 함께 글 쓴 멤버 스택 (우상단에 겹침) */
+.pin-extras {
+  position: absolute;
+  top: -6px;
+  right: -14px;
+  display: flex;
+  z-index: 3;
+}
+
+.pin-extra {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--gray);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #fff;
+  margin-left: -6px;
+}
+
+.pin-tail {
+  width: 10px;
+  height: 10px;
+  background: var(--pin);
+  transform: rotate(45deg);
+  margin-top: -7px;
+  border-radius: 1px;
+  z-index: 1;
+}
+
+.pin-label {
+  margin-top: 6px;
+  background: var(--surface);
+  border: 0.5px solid var(--hairline);
+  color: var(--ink);
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  box-shadow: 0 1px 6px rgba(16, 16, 18, 0.1);
 }

@@ -2,6 +2,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import MainGlobe from "../components/MainGlobe";
+import { c, t } from "../theme";
 
 const AuthLayout = ({ children, title, subtitle }) => {
   return (
@@ -12,17 +13,18 @@ const AuthLayout = ({ children, title, subtitle }) => {
         </div>
         <div style={styles.overlayText}>
           <h1 style={styles.logoText}>
-            pinned<span>.</span>
+            pinned<span style={{ color: c.pin }}>.</span>
           </h1>
+          <p style={styles.taglineEn}>pin your world</p>
           <p style={styles.tagline}>너의 세상을 기록해.</p>
         </div>
       </motion.div>
 
-      {/* 오른쪽: 로그인/가입 폼 (배경 통일로 경계선 제거) */}
       <div style={styles.rightPanel}>
         <motion.div
-          initial={{ opacity: 0, x: 20 }}
+          initial={{ opacity: 0, x: 16 }}
           animate={{ opacity: 1, x: 0 }}
+          transition={t.base}
           style={styles.formWrapper}
         >
           <h2 style={styles.title}>{title}</h2>
@@ -39,11 +41,11 @@ const styles = {
     display: "flex",
     height: "100vh",
     width: "100vw",
-    background: "#f8f9fa", // 전체 배경색 통일
+    background: c.bg,
     overflow: "hidden",
   },
   leftPanel: {
-    flex: 1.5, // [복구] 지구본 영역 비중 확대
+    flex: 1.5,
     position: "relative",
     display: "flex",
     justifyContent: "center",
@@ -59,30 +61,42 @@ const styles = {
   overlayText: { position: "absolute", top: "50px", left: "50px", zIndex: 10 },
   logoText: {
     fontSize: "3rem",
-    fontWeight: "900",
-    color: "#222",
+    fontWeight: 900,
+    color: c.ink,
     margin: 0,
-    letterSpacing: "-2px",
+    letterSpacing: "-0.045em",
   },
-  tagline: { color: "#666", fontSize: "1.1rem", marginTop: "5px" },
+  taglineEn: {
+    color: c.grayLight,
+    fontSize: "12px",
+    letterSpacing: "0.08em",
+    margin: "10px 0 2px",
+  },
+  tagline: {
+    color: c.gray,
+    fontSize: "1.05rem",
+    margin: 0,
+    letterSpacing: "-0.01em",
+  },
 
   rightPanel: {
-    flex: 1, // [복구] 폼 영역 비중 축소
+    flex: 1,
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
     padding: "40px",
-    background: "transparent", // [핵심] 배경색 제거하여 왼쪽과 통합
+    background: "transparent",
     zIndex: 2,
   },
   formWrapper: { width: "100%", maxWidth: "380px" },
   title: {
-    fontSize: "2.2rem",
-    fontWeight: "800",
-    marginBottom: "10px",
-    color: "#111",
+    fontSize: "2rem",
+    fontWeight: 800,
+    marginBottom: "8px",
+    color: c.ink,
+    letterSpacing: "-0.03em",
   },
-  subtitle: { color: "#666", marginBottom: "30px" },
+  subtitle: { color: c.gray, marginBottom: "28px", fontSize: "15px" },
 };
 
 export default AuthLayout;

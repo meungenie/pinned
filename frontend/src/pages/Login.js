@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AuthLayout from "../layouts/AuthLayout";
-import { formStyles } from "./Signup";
+import { c, formStyles } from "../theme";
 import { loginUser } from "../api/authApi";
 
 const Login = ({ onLogin }) => {
@@ -27,7 +27,10 @@ const Login = ({ onLogin }) => {
   };
 
   return (
-    <AuthLayout title="다시 오셨군요!" subtitle="당신의 기록이 기다리고 있어요.">
+    <AuthLayout
+      title="다시 오셨군요!"
+      subtitle="당신의 기록이 기다리고 있어요."
+    >
       <form onSubmit={handleLogin} style={formStyles.form}>
         <input
           type="email"
@@ -51,12 +54,12 @@ const Login = ({ onLogin }) => {
           disabled={loading}
           style={{ ...formStyles.button, opacity: loading ? 0.7 : 1 }}
         >
-          {loading ? "로그인 중..." : "로그인하기"}
+          {loading ? "로그인 중..." : "로그인"}
         </button>
       </form>
-      <p style={{ marginTop: "20px", color: "#666" }}>
+      <p style={{ marginTop: "20px", color: c.gray, fontSize: "14px" }}>
         아직 회원이 아니신가요?{" "}
-        <Link to="/signup" style={{ fontWeight: "bold", color: "#222" }}>
+        <Link to="/signup" style={{ fontWeight: 700, color: c.ink }}>
           회원가입
         </Link>
       </p>
@@ -65,7 +68,7 @@ const Login = ({ onLogin }) => {
 };
 
 const styles = {
-  error: { color: "#e53e3e", fontSize: "14px", margin: 0 },
+  error: { color: c.pin, fontSize: "13px", margin: 0 },
 };
 
 export default Login;

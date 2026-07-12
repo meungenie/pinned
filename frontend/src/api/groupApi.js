@@ -4,24 +4,28 @@ const BASE_URL = "http://localhost:5001";
 const authHeaders = () => ({ Authorization: `Bearer ${getToken()}` });
 
 export const fetchMyGroups = async () => {
-  const res = await fetch(`${BASE_URL}/api/groups/me`, { headers: authHeaders() });
+  const res = await fetch(`${BASE_URL}/api/groups/me`, {
+    headers: authHeaders(),
+  });
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.groups;
 };
 
 export const fetchGroupInfo = async (groupId) => {
-  const res = await fetch(`${BASE_URL}/api/groups/${groupId}`, { headers: authHeaders() });
+  const res = await fetch(`${BASE_URL}/api/groups/${groupId}`, {
+    headers: authHeaders(),
+  });
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.group;
 };
 
-export const createGroup = async ({ name, description }) => {
+export const createGroup = async ({ name, description, emoji }) => {
   const res = await fetch(`${BASE_URL}/api/groups`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ name, description }),
+    body: JSON.stringify({ name, description, emoji }),
   });
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
@@ -46,7 +50,9 @@ export const joinGroup = async (code) => {
 };
 
 export const fetchGroupPins = async (groupId) => {
-  const res = await fetch(`${BASE_URL}/api/groups/${groupId}/pins`, { headers: authHeaders() });
+  const res = await fetch(`${BASE_URL}/api/groups/${groupId}/pins`, {
+    headers: authHeaders(),
+  });
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.pins;

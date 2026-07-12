@@ -1,6 +1,7 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const db = require("../config/db");
+const storage = require("../config/gcs");
 
 const signToken = (user) =>
   jwt.sign(
@@ -67,7 +68,7 @@ exports.login = async (req, res) => {
 exports.getMe = async (req, res) => {
   try {
     const { rows } = await db.query(
-      "SELECT id, handle, username, email, created_at FROM users WHERE id = $1",
+      "SELECT id, handle, username, email, avatar_url, created_at FROM users WHERE id = $1",
       [req.user.id]
     );
     if (!rows.length) {
@@ -77,5 +78,25 @@ exports.getMe = async (req, res) => {
   } catch (err) {
     console.error("[GET_ME_ERROR]", err);
     res.status(500).json({ success: false, error: "서버 내부 에러가 발생했습니다." });
+  }
+};
+
+exports.uploadAvatar = async (req, res) => {
+  const userId = req.user.id;
+  try {
+    const bucket = storage.bucket(process.env.GCS_BUCKET_NAME);
+    const ext = req.file.originalname.split(".").pop() || "jpg";
+    const filename = `avatars/${userId}/${Date.now()}.${ext}`;
+    const gcsFile = bucket.file(filename);
+    await gcsFile.save(req.file.buffer, {
+      metadata: { contentType: req.file.mimetype },
+      public: true,
+    });
+    const url = `https://storage.googleapis.com/${process.env.GCS_BUCKET_NAME}/${filename}`;
+    await db.query("UPDATE users SET avatar_url = $1 WHERE id = $2", [url, userId]);
+    res.json({ success: true, avatar_url: url });
+  } catch (err) {
+    console.error("[UPLOAD_AVATAR_ERROR]", err);
+    res.status(500).json({ success: false, error: "아바타 업로드에 실패했습니다." });
   }
 };

@@ -53,7 +53,7 @@ const MainGlobe = ({
         width={width}
         height={height}
         showAtmosphere={true}
-        atmosphereColor="#cae2ff"
+        atmosphereColor="#dbe4ee"
         atmosphereAltitude={0.15}
         htmlElementsData={pins}
         htmlLat="lat"
@@ -61,12 +61,13 @@ const MainGlobe = ({
         htmlAltitude={0.01}
         htmlTransitionDuration={0}
         htmlElement={(pin) => {
+          // "색은 핀 하나" — 지구본 위 마커도 지도 핀과 같은 빨간 점
           const el = document.createElement("div");
           el.style.cssText =
             "display:flex;flex-direction:column;align-items:center;pointer-events:none;";
           el.innerHTML = `
-            <div style="font-size:22px;line-height:1;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.35));">📍</div>
-            <div style="background:rgba(255,255,255,0.92);color:#222;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 1px 6px rgba(0,0,0,0.18);margin-top:4px;">${pin.title}</div>
+            <div style="width:12px;height:12px;border-radius:50%;background:#FF3B1C;border:2.5px solid #fff;box-shadow:0 2px 8px rgba(16,16,18,0.35);"></div>
+            <div style="background:rgba(255,255,255,0.94);color:#101012;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:-0.01em;white-space:nowrap;border:0.5px solid #ECECE8;box-shadow:0 1px 6px rgba(16,16,18,0.14);margin-top:5px;">${pin.title}</div>
           `;
           return el;
         }}

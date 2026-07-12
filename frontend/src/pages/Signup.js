@@ -1,15 +1,33 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AuthLayout from "../layouts/AuthLayout";
-import { signupUser } from "../api/authApi";
+import { c, r, formStyles } from "../theme";
+import { signupUser, uploadAvatar } from "../api/authApi";
 
 const Signup = ({ onLogin }) => {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ handle: "", username: "", email: "", password: "" });
+  const fileInputRef = useRef(null);
+  const [form, setForm] = useState({
+    handle: "",
+    username: "",
+    email: "",
+    password: "",
+  });
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [avatarPreview, setAvatarPreview] = useState(null);
+  const [avatarHover, setAvatarHover] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+  const handleChange = (e) =>
+    setForm({ ...form, [e.target.name]: e.target.value });
+
+  const handleAvatarChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -17,6 +35,14 @@ const Signup = ({ onLogin }) => {
     setLoading(true);
     try {
       const { user } = await signupUser(form);
+      if (avatarFile) {
+        try {
+          const avatarUrl = await uploadAvatar(avatarFile);
+          user.avatar_url = avatarUrl;
+        } catch {
+          // 아바타 업로드 실패해도 가입은 완료
+        }
+      }
       onLogin(user);
       navigate("/");
     } catch (err) {
@@ -26,8 +52,42 @@ const Signup = ({ onLogin }) => {
     }
   };
 
+  const initials = form.username
+    ? form.username[0].toUpperCase()
+    : form.handle
+    ? form.handle[0].toUpperCase()
+    : "+";
+
   return (
     <AuthLayout title="계정 만들기" subtitle="세상을 기록하기 시작해요.">
+      {/* 프로필 사진 선택 */}
+      <div style={styles.avatarSection}>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          onMouseEnter={() => setAvatarHover(true)}
+          onMouseLeave={() => setAvatarHover(false)}
+          style={styles.avatarBtn}
+        >
+          {avatarPreview ? (
+            <img src={avatarPreview} alt="프로필" style={styles.avatarImg} />
+          ) : (
+            <span style={styles.avatarInitial}>{initials}</span>
+          )}
+          <span style={{ ...styles.avatarOverlay, opacity: avatarHover ? 1 : 0 }}>
+            사진 선택
+          </span>
+        </button>
+        <p style={styles.avatarHint}>프로필 사진 (선택)</p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleAvatarChange}
+          style={{ display: "none" }}
+        />
+      </div>
+
       <form onSubmit={handleSubmit} style={formStyles.form}>
         <input
           type="text"
@@ -71,12 +131,12 @@ const Signup = ({ onLogin }) => {
           disabled={loading}
           style={{ ...formStyles.button, opacity: loading ? 0.7 : 1 }}
         >
-          {loading ? "가입 중..." : "가입 완료 🚀"}
+          {loading ? "가입 중..." : "시작하기"}
         </button>
       </form>
-      <p style={{ marginTop: "20px", color: "#666" }}>
+      <p style={{ marginTop: "20px", color: c.gray, fontSize: "14px" }}>
         이미 계정이 있으신가요?{" "}
-        <Link to="/login" style={{ fontWeight: "bold", color: "#222" }}>
+        <Link to="/login" style={{ fontWeight: 700, color: c.ink }}>
           로그인
         </Link>
       </p>
@@ -84,32 +144,60 @@ const Signup = ({ onLogin }) => {
   );
 };
 
-const styles = {
-  error: { color: "#e53e3e", fontSize: "14px", margin: 0 },
-};
+const AVATAR_SIZE = 80;
 
-export const formStyles = {
-  form: { display: "flex", flexDirection: "column", gap: "15px" },
-  input: {
-    padding: "15px",
-    borderRadius: "12px",
-    border: "1px solid #eee",
-    fontSize: "1rem",
-    outline: "none",
-    background: "#f9f9f9",
-    transition: "all 0.2s",
+const styles = {
+  avatarSection: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    marginBottom: "24px",
   },
-  button: {
-    padding: "15px",
-    borderRadius: "12px",
+  avatarBtn: {
+    position: "relative",
+    width: `${AVATAR_SIZE}px`,
+    height: `${AVATAR_SIZE}px`,
+    borderRadius: "50%",
+    background: c.hairline,
     border: "none",
-    background: "#222",
-    color: "#fff",
-    fontSize: "1.1rem",
-    fontWeight: "bold",
     cursor: "pointer",
-    marginTop: "10px",
+    overflow: "hidden",
+    padding: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
+  avatarImg: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+  },
+  avatarInitial: {
+    fontSize: "28px",
+    fontWeight: 700,
+    color: c.gray,
+    fontFamily: "inherit",
+  },
+  avatarOverlay: {
+    position: "absolute",
+    inset: 0,
+    background: "rgba(0,0,0,0.35)",
+    color: "#fff",
+    fontSize: "11px",
+    fontWeight: 600,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    opacity: 0,
+    transition: "opacity 0.15s",
+    fontFamily: "inherit",
+  },
+  avatarHint: {
+    fontSize: "12px",
+    color: c.grayLight,
+    margin: "8px 0 0",
+  },
+  error: { color: c.pin, fontSize: "13px", margin: 0 },
 };
 
 export default Signup;

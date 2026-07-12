@@ -5,7 +5,7 @@ exports.getPinPosts = async (req, res) => {
   const { pinId } = req.params;
   try {
     const { rows: posts } = await db.query(
-      `SELECT p.*, u.handle, u.username
+      `SELECT p.*, u.handle, u.username, u.avatar_url
        FROM posts p
        JOIN users u ON u.id = p.user_id
        WHERE p.pin_id = $1

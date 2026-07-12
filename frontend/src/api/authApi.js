@@ -26,6 +26,19 @@ export const signupUser = async ({ handle, username, email, password }) => {
   return { user: data.user, token: data.token };
 };
 
+export const uploadAvatar = async (file) => {
+  const formData = new FormData();
+  formData.append("avatar", file);
+  const res = await fetch(`${BASE_URL}/api/auth/avatar`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${getToken()}` },
+    body: formData,
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data.avatar_url;
+};
+
 export const logoutUser = () => removeToken();
 
 export { getToken } from "../utils/auth";
