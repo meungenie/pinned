@@ -148,7 +148,7 @@ const MapView = ({ pins = [], onMapClick, onPinClick }) => {
         mapboxAccessToken={MAPBOX_TOKEN}
         initialViewState={{ longitude: 0, latitude: 20, zoom: 1.5 }}
         style={{ width: "100%", height: "100%" }}
-        mapStyle="mapbox://styles/mapbox/light-v11"
+        mapStyle="mapbox://styles/mapbox/satellite-streets-v12"
         projection="globe"
         fog={{}}
         onClick={handleMapClick}

@@ -39,8 +39,8 @@ const Signup = ({ onLogin }) => {
         try {
           const avatarUrl = await uploadAvatar(avatarFile);
           user.avatar_url = avatarUrl;
-        } catch {
-          // 아바타 업로드 실패해도 가입은 완료
+        } catch (avatarErr) {
+          console.error("[AVATAR_UPLOAD_ERROR]", avatarErr);
         }
       }
       onLogin(user);
