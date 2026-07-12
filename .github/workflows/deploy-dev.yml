@@ -128,9 +128,13 @@ jobs:
           DB_PASS=$(gcloud secrets versions access latest \
             --secret=pinned-db-password \
             --project=${{ env.PROJECT_ID }})
+          JWT_SECRET=$(gcloud secrets versions access latest \
+            --secret=jwt-secret \
+            --project=${{ env.PROJECT_ID }})
           kubectl create secret generic backend-secret \
             --from-literal=DB_USER=pinned_user \
             --from-literal=DB_PASSWORD="${DB_PASS}" \
+            --from-literal=JWT_SECRET="${JWT_SECRET}" \
             -n ${{ env.NAMESPACE }} \
             --dry-run=client -o yaml | kubectl apply -f -
 
