@@ -1,4 +1,4 @@
-import { setToken, removeToken } from "../utils/auth";
+import { setToken, removeToken, getToken } from "../utils/auth";
 
 const BASE_URL = "http://localhost:5001";
 
