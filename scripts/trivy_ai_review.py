@@ -145,8 +145,16 @@ CRITICAL/HIGH 중 실제 익스플로잇 가능성이 높은 상위 3개를 골�
     return text_block.text if text_block else "분석 생성 실패"
 
 
-def should_block(summary: dict) -> bool:
-    return summary.get("CRITICAL", 0) > 0
+def should_block(vulns: list[dict]) -> bool:
+    fixable_criticals = [
+        v for v in vulns
+        if v["severity"] == "CRITICAL" and v["fixed"] != "패치 없음"
+    ]
+    if fixable_criticals:
+        print("\n🚨 패치 가능한 CRITICAL 취약점:")
+        for v in fixable_criticals:
+            print(f"  - [{v['id']}] {v['package']} {v['installed']} → {v['fixed']}")
+    return len(fixable_criticals) > 0
 
 
 def write_step_summary(analysis: str, summary: dict, image: str) -> None:
@@ -203,8 +211,8 @@ def main() -> None:
     analysis = analyze_with_claude(vulns, summary, image)
     write_step_summary(analysis, summary, image)
 
-    if should_block(summary):
-        print(f"\n🚨 CRITICAL 취약점 {summary['CRITICAL']}개 발견 — 배포 차단")
+    if should_block(vulns):
+        print(f"\n🚨 패치 가능한 CRITICAL 취약점 발견 — 배포 차단")
         sys.exit(1)
 
     print("✅ 보안 스캔 완료 — 배포 진행")
