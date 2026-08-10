@@ -1,6 +1,7 @@
 FROM node:20-alpine
 
-RUN apk update && apk upgrade --no-cache
+RUN apk update && apk upgrade --no-cache && \
+    npm install -g npm@latest
 
 WORKDIR /app
 
