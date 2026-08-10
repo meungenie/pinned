@@ -99,12 +99,12 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: pip install anthropic
-      - name: AI Security Analysis
+      - name: AI Security Analysis (개발계 — 경고만, 차단 없음)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           python scripts/trivy_ai_review.py trivy-report.json \
-            "${{ needs.build-push.outputs.image }}"
+            "${{ needs.build-push.outputs.image }}" || true
 
   # ── 4단계: K8s Secret 생성 (GCP Secret Manager → pinned-dev) ─────
   create-dev-secret:
