@@ -5,7 +5,7 @@ RUN apk update && apk upgrade --no-cache
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --production
+RUN npm install --production && npm install tar@^7.5.19 --save-exact
 
 COPY . .
 
