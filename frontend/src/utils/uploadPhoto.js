@@ -1,6 +1,5 @@
 import { getToken } from "./auth";
-
-const BASE_URL = "http://localhost:5001";
+import { BASE_URL } from "../config";
 
 export const uploadPhoto = async (file, postId, index) => {
   const formData = new FormData();

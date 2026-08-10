@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const cookieParser = require("cookie-parser");
 const authRoutes = require("./routes/authRoutes");
 const pinRoutes = require("./routes/pinRoutes");
 const groupRoutes = require("./routes/groupRoutes");
@@ -12,7 +13,8 @@ const app = express();
 
 // 보안 미들웨어 설정
 app.use(helmet());
-app.use(cors({ origin: "http://localhost:3000" })); // 프론트 주소만 허용
+app.use(cors({ origin: "http://localhost:3000", credentials: true }));
+app.use(cookieParser());
 app.use(express.json());
 
 // 헬스체크 (쿠버네티스 liveness/readiness probe)

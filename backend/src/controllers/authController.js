@@ -1,14 +1,37 @@
 const bcrypt = require("bcrypt");
+const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const db = require("../config/db");
 const storage = require("../config/gcs");
 
-const signToken = (user) =>
+const REFRESH_TOKEN_EXPIRES_DAYS = 14;
+const REFRESH_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "strict",
+  maxAge: REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000,
+  path: "/api/auth",
+};
+
+const signAccessToken = (user) =>
   jwt.sign(
     { id: user.id, email: user.email, handle: user.handle, username: user.username },
     process.env.JWT_SECRET,
-    { expiresIn: "30d" }
+    { expiresIn: "15m" }
   );
+
+const issueRefreshToken = async (userId) => {
+  const raw = crypto.randomBytes(64).toString("hex");
+  const hash = crypto.createHash("sha256").update(raw).digest("hex");
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
+
+  await db.query(
+    "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+    [userId, hash, expiresAt]
+  );
+
+  return raw;
+};
 
 exports.register = async (req, res) => {
   const { handle, username, email, password } = req.body;
@@ -29,7 +52,11 @@ exports.register = async (req, res) => {
       [handle, username, email, hash]
     );
     const user = rows[0];
-    res.status(201).json({ success: true, user, token: signToken(user) });
+    const accessToken = signAccessToken(user);
+    const refreshToken = await issueRefreshToken(user.id);
+
+    res.cookie("refresh_token", refreshToken, REFRESH_COOKIE_OPTIONS);
+    res.status(201).json({ success: true, user, accessToken });
   } catch (err) {
     if (err.code === "23505") {
       const msg = err.constraint?.includes("email")
@@ -58,11 +85,71 @@ exports.login = async (req, res) => {
     }
 
     const { password_hash, ...safeUser } = user;
-    res.json({ success: true, user: safeUser, token: signToken(safeUser) });
+    const accessToken = signAccessToken(safeUser);
+    const refreshToken = await issueRefreshToken(user.id);
+
+    res.cookie("refresh_token", refreshToken, REFRESH_COOKIE_OPTIONS);
+    res.json({ success: true, user: safeUser, accessToken });
   } catch (err) {
     console.error("[LOGIN_ERROR]", err);
     res.status(500).json({ success: false, error: "서버 내부 에러가 발생했습니다." });
   }
+};
+
+exports.refresh = async (req, res) => {
+  const raw = req.cookies?.refresh_token;
+  if (!raw) {
+    return res.status(401).json({ success: false, error: "Refresh token이 없습니다." });
+  }
+
+  const hash = crypto.createHash("sha256").update(raw).digest("hex");
+
+  try {
+    const { rows } = await db.query(
+      `SELECT rt.*, u.id as uid, u.email, u.handle, u.username, u.avatar_url
+       FROM refresh_tokens rt
+       JOIN users u ON u.id = rt.user_id
+       WHERE rt.token_hash = $1 AND rt.expires_at > NOW()`,
+      [hash]
+    );
+
+    if (!rows.length) {
+      res.clearCookie("refresh_token", { ...REFRESH_COOKIE_OPTIONS, maxAge: 0 });
+      return res.status(401).json({ success: false, error: "유효하지 않은 Refresh token입니다." });
+    }
+
+    const row = rows[0];
+
+    // Refresh token rotation: 기존 삭제 후 새 토큰 발급
+    await db.query("DELETE FROM refresh_tokens WHERE token_hash = $1", [hash]);
+    const newRefreshToken = await issueRefreshToken(row.uid);
+
+    const user = {
+      id: row.uid,
+      email: row.email,
+      handle: row.handle,
+      username: row.username,
+      avatar_url: row.avatar_url,
+    };
+
+    res.cookie("refresh_token", newRefreshToken, REFRESH_COOKIE_OPTIONS);
+    res.json({ success: true, user, accessToken: signAccessToken(user) });
+  } catch (err) {
+    console.error("[REFRESH_ERROR]", err);
+    res.status(500).json({ success: false, error: "서버 내부 에러가 발생했습니다." });
+  }
+};
+
+exports.logout = async (req, res) => {
+  const raw = req.cookies?.refresh_token;
+
+  if (raw) {
+    const hash = crypto.createHash("sha256").update(raw).digest("hex");
+    await db.query("DELETE FROM refresh_tokens WHERE token_hash = $1", [hash]).catch(() => {});
+  }
+
+  res.clearCookie("refresh_token", { ...REFRESH_COOKIE_OPTIONS, maxAge: 0 });
+  res.json({ success: true });
 };
 
 exports.getMe = async (req, res) => {
@@ -88,9 +175,11 @@ exports.uploadAvatar = async (req, res) => {
     const ext = req.file.originalname.split(".").pop() || "jpg";
     const filename = `avatars/${userId}/${Date.now()}.${ext}`;
     const gcsFile = bucket.file(filename);
+
     await gcsFile.save(req.file.buffer, {
       metadata: { contentType: req.file.mimetype },
     });
+
     const url = `https://storage.googleapis.com/${process.env.GCS_BUCKET_NAME}/${filename}`;
     await db.query("UPDATE users SET avatar_url = $1 WHERE id = $2", [url, userId]);
     res.json({ success: true, avatar_url: url });

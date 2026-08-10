@@ -1,4 +1,4 @@
-const BASE_URL = "http://localhost:5001";
+import { BASE_URL } from "../config";
 
 export const fetchPins = async () => {
   const res = await fetch(`${BASE_URL}/api/pins`);

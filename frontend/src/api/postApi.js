@@ -1,6 +1,5 @@
 import { getToken } from "../utils/auth";
-
-const BASE_URL = "http://localhost:5001";
+import { BASE_URL } from "../config";
 const authHeaders = () => ({ Authorization: `Bearer ${getToken()}` });
 
 export const fetchPinPosts = async (pinId) => {

@@ -1,5 +1,5 @@
-const TOKEN_KEY = "pinned_token";
+let _accessToken = null;
 
-export const getToken = () => localStorage.getItem(TOKEN_KEY);
-export const setToken = (token) => localStorage.setItem(TOKEN_KEY, token);
-export const removeToken = () => localStorage.removeItem(TOKEN_KEY);
+export const getToken = () => _accessToken;
+export const setToken = (token) => { _accessToken = token; };
+export const removeToken = () => { _accessToken = null; };
