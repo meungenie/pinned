@@ -1,6 +1,6 @@
 FROM node:20-alpine
 
-RUN apk upgrade --no-cache libcrypto3 libssl3
+RUN apk update && apk upgrade --no-cache
 
 WORKDIR /app
 
